@@ -387,10 +387,10 @@ def main():
         raise Exception("GOWINHOME not set")
     gowin_debug = os.getenv("GOWIN_DEBUG")
 
-    with open(f"{gowinhome}/IDE/share/device/{params['device']}/{params['device']}.fse", 'rb') as f:
-        fse = fse_parser.read_fse(f, device)
-
     dat = dat_parser.Datfile(Path(f"{gowinhome}/IDE/share/device/{params['device']}/{params['device']}.dat"))
+
+    with open(f"{gowinhome}/IDE/share/device/{params['device']}/{params['device']}.fse", 'rb') as f:
+        fse = fse_parser.read_fse(f, device, fse_parser.WIDTHS_1912 if dat.gowin_1912 else None)
 
     if params['device'] in {"GW5AT-60B", "GW5AST-138C"}:
         dat.patch_grid_bram_138()
