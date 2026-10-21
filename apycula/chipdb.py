@@ -4000,9 +4000,17 @@ def fse_create_logic2clk(dev, device, dat: Datfile):
                         else:
                             add_node(dev, postgate_wire_name, "GLOBAL_CLK", row, col, wnames.wirenames[wire_idx])
                         print(f'60k additional wire: ({row}, {col}) {wnames.wirenames[wire_idx]} -> {postgate_wire_name} -> {clkwire_name}')
+                    else:
+                        # The middle gates (TRMDCLK0 and the like) have no
+                        # POSTGATE wire, and the wire that joins their gate
+                        # to the clock line isn't known, so nothing connects
+                        # the gate: a BUFG placed there can't reach the
+                        # clock network. Don't offer it as a BUFG.
+                        print(f'60k gate without a known wire, no BUFG: ({row}, {col}) {wnames.wirenames[wire_idx]} -> {clkwire_name}')
                 else:
                     add_node(dev, mk_clock_wname(device, wnames.clknames[clkwire_idx], half), "GLOBAL_CLK", row, col, wnames.wirenames[wire_idx])
-                add_buf_bel(dev, row, col, wnames.wirenames[wire_idx])
+                if device not in {'GW5AT-60B'} or postgate_wire_name:
+                    add_buf_bel(dev, row, col, wnames.wirenames[wire_idx])
                 # Make list of the clock gates for nextpnr
                 dev.extra_func.setdefault((row, col), {}).setdefault('clock_gates', []).append(wnames.wirenames[wire_idx])
 
