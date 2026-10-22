@@ -1166,11 +1166,22 @@ def gw5_hclk_idx(dev, device, row, col):
             return 2
         return 3
     if device == 'GW5AT-60B':
-        # Only the right side's HCLK so far, the one cam2dvi's OSER10s use
-        # (rows 21-38). It's numbered 3, as the 25A's right side, because
-        # nextpnr knows HCLK wires by the names HCLK00-HCLK33.
+        # The 60B has five HCLKs (UG306 Figure 2-6): the top (banks 1 and
+        # 2, big table 48 cell (0, 109)), the right (banks 3-5, (37, 146)),
+        # the bottom right (banks 6-8, (73, 109)), the bottom left (bank 9,
+        # (73, 36)) and the left (banks 10 and 11, (46, 0)). nextpnr knows
+        # HCLK wires by the names HCLK00-HCLK33, so four at most: the top
+        # is 0, the bottom right 1 and the right 3, as the 25A's right side.
+        # The bottom left and the left aren't modelled yet. Bank 1 starts
+        # at IOT74 and bank 8 at IOB75 (the pin table; IOx<n> is column
+        # n - 1), so both HCLKs end there; IOLOGICs left of that on those
+        # edges get no FCLK.
         if col == dev.cols - 1 and 0 < row < dev.rows - 1:
             return 3
+        if row == 0 and 73 <= col < dev.cols - 1:
+            return 0
+        if row == dev.rows - 1 and 74 <= col < dev.cols - 1:
+            return 1
     return -1
 
 # Table 48 describes the HCLK wire connections, but the problem is that it also
@@ -1210,9 +1221,9 @@ def gw5_logic_to_hclk_wires(device):
     if device == 'GW5A-25A':
         return {0: (0, 64), 1: (36, 27), 2: (1, 0), 3: (34, 91)}
     if device == 'GW5AT-60B':
-        # The right HCLK's big table 48 cell; cam2dvi brings its pixel clock
-        # in on this cell's CLK1 (L2HCLK31).
-        return {3: (37, 146)}
+        # The big table 48 cells (gw5_hclk_idx); cam2dvi brings its pixel
+        # clock into the right one on its CLK1 (L2HCLK31).
+        return {0: (0, 109), 1: (73, 109), 3: (37, 146)}
     return {}
 
 def make_hclk_pip(dev, hclk_idx, row, col, src, dest, fuses = set()):
