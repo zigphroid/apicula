@@ -4626,6 +4626,7 @@ def set_chip_flags(dev, device):
     if device in {'GW5AT-60B'}:
         dev.chip_flags.append("HAS_EMPTY_QUADRANT")
         dev.chip_flags.append("HAS_5A_HCLK")
+        dev.chip_flags.append("HAS_5A_IDES")
         dev.chip_flags.append("HAS_PINCFG")
         dev.chip_flags.append("HAS_I2CCFG")
         dev.chip_flags.append("HAS_DFF67")
