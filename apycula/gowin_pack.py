@@ -6692,6 +6692,22 @@ class GW5A_25A(GW5A):
 ################################################################
 class GW5AT_60B(GW5A):
     """ GW5AT-60B chip. TangCosole60k board """
+    # The FCLK lane select, as the 25A's (the same attributes and values in
+    # the 60B's IOLOGIC tables; Sipeed's cam2dvi sets lane 1's fuses).
+    _fclk_out_sel = {
+        'SPINE10': [('FCLKSEL0', 'HCLK0'), ('FCLKSEL1', 'HCLK0'), ('FCLKSEL2', 'HCLK0_'), ('FCLKSEL3', 'HCLK0')],
+        'SPINE11': [('FCLKSEL0', 'HCLK1'), ('FCLKSEL1', 'HCLK1'), ('FCLKSEL2', 'HCLK1_'), ('FCLKSEL4', 'HCLK1')],
+        'SPINE12': [('FCLKSEL0', 'HCLK2'), ('FCLKSEL1', 'HCLK2'), ('FCLKSEL2', 'HCLK2_'), ('FCLKSEL3', 'HCLK2')],
+        'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
+    }
+
+    def get_out_iologic_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
+        attr_vals = super().get_out_iologic_attrs(bel)
+        if bel.fclk in self._fclk_out_sel:
+            attr_vals.append(AttrVal('WRFCLKSEL', 'UNK102'))
+            attr_vals += [AttrVal(a, v) for a, v in self._fclk_out_sel[bel.fclk]]
+        return attr_vals
+
     def __init__(self, cli_args: CliArgs, pnr: Netlist):
         super().__init__(cli_args, pnr)
         self.used_clock_spines = set()

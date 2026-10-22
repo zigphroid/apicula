@@ -1165,6 +1165,12 @@ def gw5_hclk_idx(dev, device, row, col):
         if col == 0:
             return 2
         return 3
+    if device == 'GW5AT-60B':
+        # Only the right side's HCLK so far, the one cam2dvi's OSER10s use
+        # (rows 21-38). It's numbered 3, as the 25A's right side, because
+        # nextpnr knows HCLK wires by the names HCLK00-HCLK33.
+        if col == dev.cols - 1 and 0 < row < dev.rows - 1:
+            return 3
     return -1
 
 # Table 48 describes the HCLK wire connections, but the problem is that it also
@@ -1173,10 +1179,11 @@ def gw5_hclk_idx(dev, device, row, col):
 # Inter-hclk wires have unique wire numbers, whereas the HCLK wires are the
 # same for all HCLK and are determined by the layout of Table 48 itself.
 def gw5_hclk_wire_offset(device):
-    return {'GW5A-25A': 187, 'GW5AST-138C': 187}[device]
+    return {'GW5A-25A': 187, 'GW5AST-138C': 187, 'GW5AT-60B': 198}[device]
 
 def gw5_ihclk_wire_num(device):
-    return {'GW5A-25A': 65}[device]
+    # XXX the 60B's inter-HCLK wires aren't worked out yet
+    return {'GW5A-25A': 65, 'GW5AT-60B': 0}[device]
 
 def gw5_get_num_of_hclks(device):
     if device == 'GW5A-25A':
@@ -1194,11 +1201,18 @@ def gw5_create_hclk_iol_pip(dev, device, row, col):
             return row not in {10, 18}
         if col == dev.cols - 1:
             return row not in {2, 10, 27}
+    if device == 'GW5AT-60B':
+        # (the IOBs aren't in the database yet at this point)
+        return 'IOLOGICA' in dev[row, col].bels
     return False
 
 def gw5_logic_to_hclk_wires(device):
     if device == 'GW5A-25A':
         return {0: (0, 64), 1: (36, 27), 2: (1, 0), 3: (34, 91)}
+    if device == 'GW5AT-60B':
+        # The right HCLK's big table 48 cell; cam2dvi brings its pixel clock
+        # in on this cell's CLK1 (L2HCLK31).
+        return {3: (37, 146)}
     return {}
 
 def make_hclk_pip(dev, hclk_idx, row, col, src, dest, fuses = set()):
@@ -1215,8 +1229,7 @@ def gw5_make_hclk_pips(dev, device, fse, dat: Datfile):
         make_hclk_pip(dev, hclk_idx, row, col, src, dest, fuses)
 
     # make logic to hclk nodes
-    for hclk_idx in range(gw5_get_num_of_hclks(device)):
-        row, col = gw5_logic_to_hclk_wires(device)[hclk_idx]
+    for hclk_idx, (row, col) in gw5_logic_to_hclk_wires(device).items():
         for idx in range(4):
             src = ["CLK0", "CLK1", "CLK2", "LSR2"][idx]
             dest = wnames.hclknames[30 + idx + hclk_idx * hclk_off]
@@ -1278,7 +1291,8 @@ def gw5_make_hclk_pips(dev, device, fse, dat: Datfile):
     # XXX This section will need to be modified for the 138C—it has more HCLKs
     row = 0
     col = 0
-    for hclk_idx in range(4):
+    hclks = gw5_logic_to_hclk_wires(device).keys()
+    for hclk_idx in hclks:
         for j in range(4):
             # make pip HCLKxy <- HCLK_MUX_ALPHAxy
             src = f'HCLK_MUX_ALPHA{hclk_idx}{j}'
@@ -1318,7 +1332,7 @@ def gw5_make_hclk_pips(dev, device, fse, dat: Datfile):
 
 
     # Epsilon defaults
-    for i in range(4):
+    for i in hclks:
         mk_hclk_pip(i, row, col, f'HCLK_MUX_EPSILON{i}0', f'HCLK_BUF_AI{i}0')
         mk_hclk_pip(i, row, col, f'HCLK_MUX_EPSILON{i}2', f'HCLK_BUF_AI{i}1')
         mk_hclk_pip(i, row, col, f'HCLK_MUX_EPSILON{i}4', f'HCLK_BUF_AI{i}2')
@@ -1333,6 +1347,9 @@ def gw5_make_hclk_pips(dev, device, fse, dat: Datfile):
         src =  f'HCLK_MUX_GAMMA{i}2'
         dest = f'HCLK_HUB{i}1'
         mk_hclk_pip(i, row, col, src, dest)
+
+    if device != 'GW5A-25A':
+        return
 
     # Inter-hclk outs
     mk_hclk_pip('_IHCLK', row, col, 'HCLK_IHCLK_OUT00', 'HCLK_FROM_IHCLK00')
@@ -2033,6 +2050,9 @@ def fse_create_hclk_nodes(dev, device, fse, dat: Datfile):
     if device in {'GW5A-25A'}:
         gw5_make_pin_to_hclk(dev)
         gw5_make_hclk_to_clk_gates(dev, device, fse, dat)
+        gw5_make_hclk_pips(dev, device, fse, dat)
+        return
+    if device == 'GW5AT-60B':
         gw5_make_hclk_pips(dev, device, fse, dat)
         return
 
@@ -4605,6 +4625,7 @@ def set_chip_flags(dev, device):
         dev.chip_flags.append("HAS_5A_IDES")
     if device in {'GW5AT-60B'}:
         dev.chip_flags.append("HAS_EMPTY_QUADRANT")
+        dev.chip_flags.append("HAS_5A_HCLK")
         dev.chip_flags.append("HAS_PINCFG")
         dev.chip_flags.append("HAS_I2CCFG")
         dev.chip_flags.append("HAS_DFF67")
