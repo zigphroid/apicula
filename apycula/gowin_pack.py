@@ -6701,6 +6701,17 @@ class GW5AT_60B(GW5A):
         'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
     }
 
+    def process_TLVDS_OBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
+        # The 60B pair's B side has fuses of its own (in its IOBB's cell),
+        # and Gowin sets IO_TYPE and LVDS_OUT=ON there too (Sipeed's
+        # cam2dvi, N pins); the common code sets LVDS_OUT on the A side only.
+        self.check_tlvds_placement(bel)
+        av = self.set_io_attrvals(bel, self.default_tlvds_obuf_attrs, force_attrs = {'DRIVE': '0', 'BANK_VCCIO': self.get_lvds_bank_vccio()})
+        io_type = bel.cell.attrs.get('IO_TYPE') or self.get_default_tlvds_io_type()
+        self.chipdb.get_iob_attr_val(AttrVal("IO_TYPE", io_type), av)
+        self.chipdb.get_iob_attr_val(AttrVal("LVDS_OUT", "ON"), av)
+        return self.get_iob_fuses(bel.x, bel.y, bel.idx_str, av)
+
     def get_IOLOGIC_DUMMY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         # On the 60B the B half of an IO pair keeps its IOLOGIC fuses in the
         # cell of its IOBB (fuse_cell_offset, one row down), as the IOBB's
