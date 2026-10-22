@@ -28,6 +28,34 @@ def read_bitstream_version(fname):
                 break
     return ver
 
+# GW5A bitstreams written by Gowin's IDE with compression on carry a prefix
+# code in a header line 7e 80 00 LEN. Its first byte is the escape code, then
+# (code, byte) pairs; each code is written behind a leading 1 bit, so 0x03 is
+# the code '1'. A frame decodes MSB first; the escape is followed by a literal
+# byte. Frames decode to compress_padding + frame width bits; the last 64 bits
+# of each line (CRC and 0xff padding) are not encoded.
+def make_gw5_prefix_code(table):
+    codes = {bin(table[0])[3:]: None}
+    for i in range(1, len(table) - 1, 2):
+        codes[bin(table[i])[3:]] = table[i + 1]
+    return codes
+
+def gw5_prefix_decode(codes, bits, nbytes):
+    out = []
+    cur = ''
+    i = 0
+    while len(out) < nbytes:
+        cur += bits[i]
+        i += 1
+        if cur in codes:
+            val = codes[cur]
+            cur = ''
+            if val is None:
+                val = int(bits[i:i + 8], 2)
+                i += 8
+            out.append(val)
+    return ''.join(f'{b:08b}' for b in out)
+
 def read_bitstream(fname):
     bitmap = []
     returnBitmap = []
@@ -47,6 +75,8 @@ def read_bitstream(fname):
     calc = make_crc16_arc()
     compressed = False
     compress_keys = {}
+    prefix_code = None
+    frame_bits = None   # frame width, needed only to decode a prefix code
     with open(fname) as inp:
         for line in inp:
             if line.startswith("//"):
@@ -59,6 +89,8 @@ def read_bitstream(fname):
                     hdr.append(ba)
                     if ba[0] == 0x10 and (int.from_bytes(ba, 'big') & (1 << 13)):
                         compressed = True
+                    if ba[0] == 0x7e and ba[1] == 0x80 and ba[2] == 0:
+                        prefix_code = make_gw5_prefix_code(ba[4:4 + ba[3]])
                     if ba[0] == 0x51:
                         compress_keys[f'{ba[5]:08b}'] = 8
                         if ba[6]:
@@ -125,6 +157,7 @@ def read_bitstream(fname):
                     elif ba == b'\x06\x00\x00\x00\x00\x01\x48\x1b':   # GW5AT-60B
                         padding = 3
                         compress_padding = 43
+                        frame_bits = 917
                         is5ASeries = True
                     elif ba == b'\x06\x00\x00\x00\x00\x01\x08\x1b':   # GW5AST-138C
                         padding = 3
@@ -145,7 +178,14 @@ def read_bitstream(fname):
                     print("crc error - frame:", c, frames, " : ", crc1, " != ", crc2)
 
                 crcdat = ba[-6:]
-            if compressed:
+            if compressed and prefix_code:
+                assert frame_bits, "prefix-coded frames: frame width unknown for this device"
+                # 8 bytes of tail stay as written, the rest is the frame
+                width = len(line.strip()) - 64
+                nbytes = (compress_padding + frame_bits) // 8
+                frame = gw5_prefix_decode(prefix_code, line.strip()[:width], nbytes)
+                bitmap.append(bitarr(frame + line.strip()[-64:], compress_padding))
+            elif compressed:
                 uncompressed_line = ''
                 for byte_str in chunks(line[:-64], 8):
                     if byte_str in compress_keys:

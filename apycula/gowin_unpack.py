@@ -17,8 +17,12 @@ _packages = {
         'GW1N-2' : 'QFN48XF',
         'GW1N-1' : 'LQFP144', 'GW1NZ-1' : 'QFN48', 'GW1N-4' : 'PBGA256', 'GW1N-9C' : 'UBGA332',
         'GW1N-9' : 'PBGA256', 'GW1NS-4' : 'QFN48P', 'GW1NS-2' : 'LQFP144', 'GW2A-18': 'PBGA256',
-        'GW2A-18C' : 'PBGA256S', 'GW5A-25A' : 'MBGA121N', 'GW5AST-138C' : 'PBGA484A'
+        'GW2A-18C' : 'PBGA256S', 'GW5A-25A' : 'MBGA121N', 'GW5AST-138C' : 'PBGA484A', 'GW5AT-60B' : 'PBGA484A'
 }
+
+def _tb(tile, row, col):
+    # the 60B's hole cells have no bits
+    return tile[row][col] if row < len(tile) and col < len(tile[row]) else 0
 
 def print_sorted_dict(start, d):
     print(start, end='{')
@@ -250,8 +254,8 @@ def parse_attrvals(tile, logicinfo_table, fuse_table, attrname_table, tableName)
             zero_mask.update(bits)
         else:
             set_mask.update(bits)
-    set_bits = {(row, col) for row, col in set_mask if tile[row][col] == 1}
-    neg_bits = {(row, col) for row, col in zero_mask if tile[row][col] == 1}
+    set_bits = {(row, col) for row, col in set_mask if row < len(tile) and col < len(tile[row]) and _tb(tile, row, col) == 1}
+    neg_bits = {(row, col) for row, col in zero_mask if row < len(tile) and col < len(tile[row]) and _tb(tile, row, col) == 1}
 
     # find candidates from fuse table
     # the set bits are more unique
@@ -581,14 +585,14 @@ def parse_tile_(db, row, col, tile, bm=None, default=True, noiostd = True):
             bels[name] = {"C2L"}
             mode_bits = {(row, col)
                          for row, col in bel.mode_bits
-                         if tile[row][col] == 1}
+                         if _tb(tile, row, col) == 1}
             for mode, bits in bel.modes.items():
                 if bits == mode_bits and (default or bits):
                     bels[name] = {mode}
         else:
             mode_bits = {(row, col)
                          for row, col in bel.mode_bits
-                         if tile[row][col] == 1}
+                         if _tb(tile, row, col) == 1}
             #print(name, sorted(bel.mode_bits))
             #print("read mode:", sorted(mode_bits))
             for mode, bits in bel.modes.items():
@@ -597,7 +601,7 @@ def parse_tile_(db, row, col, tile, bm=None, default=True, noiostd = True):
                     bels.setdefault(name, set()).add(mode)
         # simple flags
         for flag, bits in bel.flags.items():
-            used_bits = {tile[row][col] for row, col in bits}
+            used_bits = {_tb(tile, row, col) for row, col in bits}
             if all(used_bits):
                 if name == "RAM16" and not name in bels:
                     continue
@@ -619,7 +623,7 @@ def parse_tile_(db, row, col, tile, bm=None, default=True, noiostd = True):
         pip_bits = set().union(*srcs.values())
         used_bits = {(row, col)
                      for row, col in pip_bits
-                     if tile[row][col] == 1}
+                     if _tb(tile, row, col) == 1}
         for src, bits in srcs.items():
             # optionally ignore the defautl set() state
             if bits == used_bits and (default or bits):
@@ -629,7 +633,7 @@ def parse_tile_(db, row, col, tile, bm=None, default=True, noiostd = True):
         pip_bits = set().union(*srcs.values())
         used_bits = {(row, col)
                      for row, col in pip_bits
-                     if tile[row][col] == 1}
+                     if _tb(tile, row, col) == 1}
         for src, bits in srcs.items():
             if bits == used_bits:
                 clock_pips[dest] = src
@@ -1331,7 +1335,13 @@ def main():
     _pinout = db.pinout[_device][_packages[_device]]
 
     bitmap, _, _, extra_slots = read_bitstream(args.bitstream)
-    bm = chipdb.tile_bitmap(db, bitmap)
+    if _device == 'GW5AT-60B':
+        from apycula import gowin_pack
+        class _F: pass
+        _f = _F(); _f.chipdb = gowin_pack.ChipDB('GW5AT-60B')
+        bm = chipdb.tile_bitmap_holes(db, bitmap, gowin_pack.GW5AT_60B.get_tilemap_func(_f))
+    else:
+        bm = chipdb.tile_bitmap(db, bitmap)
     mod = codegen.Module()
     cst = codegen.Constraints()
 
@@ -1361,8 +1371,11 @@ def main():
     # Slots have no wires only func fuses
     if extra_slots:
         for slot_idx, slot_bitmap in extra_slots.items():
-            if slot_idx in {2, 3, 4, 5, 6, 8}:
-                av = parse_attrvals(slot_bitmap, db.rev_logicinfo('PLL'), db.shortval[1024]['PLL'], attrids.pll_attrids, "PLL")
+            if slot_idx in {2, 3, 4, 5, 6, 8, 18}:
+                try:
+                    av = parse_attrvals(slot_bitmap, db.rev_logicinfo('PLL'), db.shortval[1024]['PLL'], attrids.pll_attrids, "PLL")
+                except IndexError:
+                    av = 'not a PLL here'
                 print('Slot:', slot_idx, av)
             elif slot_idx in {1}:
                 av = parse_attrvals(slot_bitmap, db.rev_logicinfo('ADC'), db.shortval[1026]['ADC'], attrids.adc_attrids, "ADC")
