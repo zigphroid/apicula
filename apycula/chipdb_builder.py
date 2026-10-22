@@ -164,6 +164,25 @@ def tbrl2rc(fse, side, num):
     return (row, col)
 
 _tbrlre = re.compile(r"IO([TBRL])(\d+)")
+def fix_60b_iobb_diff(db, diff_cap_info):
+    # On the 60B the top edge's B halves live in the next cell (ttyp 383),
+    # and that cell carries an IOBA table of its own, so fill_GW5A_io_bels
+    # takes them for unpaired pins (its IOR3AB rule) and gowin_pack refuses
+    # LVDS there. The package's pin list says which are pairs (UG1222's
+    # "Comp_of_" pins): take is_diff and true LVDS from it for every moved B.
+    for row in range(db.rows):
+        for col in range(db.cols):
+            bel = db[row, col].bels.get('IOBB')
+            if bel is None or bel.fuse_cell_offset in (None, (0, 0)):
+                continue
+            name = chipdb.rc2tbrl_0(db, row, col, 'B')
+            if name not in diff_cap_info:
+                continue
+            is_diff, is_true_lvds, is_positive, _ = diff_cap_info[name]
+            bel.is_diff = is_diff
+            bel.is_true_lvds = is_true_lvds
+            bel.is_diff_p = is_positive
+
 def fse_iob(fse, db, diff_cap_info, locations, device):
     chipdb.set_corners_io(db, device)
     iob_bels = {}
@@ -442,6 +461,8 @@ def main():
     fse_iob(fse, db, diff_cap_info, locations, device)
     if chipdb.is_GW5_family(device):
         chipdb.fill_GW5A_io_bels(db)
+        if device == 'GW5AT-60B':
+            fix_60b_iobb_diff(db, diff_cap_info)
     chipdb.dat_fill_io_cfgs(db, dat, device, db.pinout[params['device']][params['package']])
 
     pad_locs = pindef.get_pll_pads_locs(params['device'], params['package'])
