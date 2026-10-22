@@ -6701,6 +6701,33 @@ class GW5AT_60B(GW5A):
         'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
     }
 
+    def get_IOLOGIC_DUMMY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        # On the 60B the B half of an IO pair keeps its IOLOGIC fuses in the
+        # cell of its IOBB (fuse_cell_offset, one row down), as the IOBB's
+        # own fuses are. An OSER10's D8 and D9 come in through that half,
+        # so without these they never reach the pin.
+        iol_bel = self.make_IologicBelDesc(bel)
+        iol_bel = self.set_iologic_bel_fclk(iol_bel)
+        attr_vals = self.common_iologic_handler(iol_bel)
+        if iol_bel.main_cell_outmode:
+            attr_vals += self.get_out_iologic_attrs(iol_bel)
+        else:
+            attr_vals += self.get_in_iologic_attrs(iol_bel)
+        if iol_bel.main_cell_outmode == 'ODDRX5':
+            # As Gowin's for an OSER10's aux half (Sipeed's cam2dvi): no
+            # OUTMODE or ISI, the output clock enabled.
+            attr_vals = [a for a in attr_vals if a.attr not in ('OUTMODE', 'ISI')]
+            attr_vals.append(AttrVal('OCLKCE', 'CE'))
+        av = self.set_iologic_attrvals(iol_bel, attr_vals)
+        x, y = iol_bel.x, iol_bel.y
+        if iol_bel.idx_str == 'B':
+            off = self.chipdb.get_iob_fuse_cell_offset(x, y, 'B')
+            if off:
+                x += off[1]
+                y += off[0]
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
+        return [CellFuseBits(x, y, bits)] if bits else []
+
     def get_out_iologic_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
         attr_vals = super().get_out_iologic_attrs(bel)
         if bel.fclk in self._fclk_out_sel:
