@@ -6701,6 +6701,27 @@ class GW5AT_60B(GW5A):
         'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
     }
 
+    def get_io_bank_fuses(self) -> list[CellFuseBits]:
+        # Each bank has one fuse that powers its differential receivers. The
+        # bank table lists it under every differential IO_TYPE with PADDI
+        # (LVDS25, LVCMOS33D, SSTL15D...), but the bank's IO_TYPE is taken
+        # from its single-ended IOs, so a bank whose only LVDS IOs are
+        # inputs never gets it, and its TLVDS_IBUFs read nothing. Add the
+        # receiver fuses for each such bank (found on a Tang Console 60K: a
+        # TLVDS_IBUF clock and IDES10 lanes came alive with it set by hand).
+        fuses = super().get_io_bank_fuses()
+        for bank, bank_desc in self.io_banks.items():
+            io_types = {bel.cell.attrs.get('IO_TYPE') or self.get_default_tlvds_io_type()
+                        for bel in bank_desc.bels if bel.cell.typ in {'TLVDS_IBUF', 'TLVDS_IOBUF'}}
+            for io_type in io_types:
+                av = set()
+                self.chipdb.get_bank_attr_val(AttrVal('IO_TYPE', io_type), av)
+                self.chipdb.get_bank_attr_val(AttrVal('PADDI', 'PADDI'), av)
+                bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
+                if bits:
+                    fuses.append(CellFuseBits(bank_desc.x, bank_desc.y, bits))
+        return fuses
+
     def process_TLVDS_OBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
         # The 60B pair's B side has fuses of its own (in its IOBB's cell),
         # and Gowin sets IO_TYPE and LVDS_OUT=ON there too (Sipeed's
