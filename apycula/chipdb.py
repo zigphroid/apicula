@@ -3189,7 +3189,14 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
                 # PIP with the required SPINE as the
                 # destination. We make these PIPs unique to simplify the debugging of global wire
                 # routing in nextpnr.
-                if not dest in created_spine_pips:
+                # PCLK6 and PCLK7 are the outputs of the clock selectors
+                # (DCS), not plain wires: on the board a clock routed onto
+                # SPINE6/7 through PCLK6A/7A never arrived (gatecheck,
+                # fbshow), while Gowin's build of the same design ran. Until
+                # the DCS's settings are known, offer no way onto spines 6
+                # and 7, so a design's 7th and 8th clocks take ordinary
+                # wires instead of dying silently.
+                if not dest in created_spine_pips and int(dest[5:]) % 8 not in {6, 7}:
                     created_spine_pips.add(dest)
                     spine_no = int(dest[5:])
                     pclk_no = spine_no % 8
