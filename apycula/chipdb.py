@@ -3213,6 +3213,19 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
                 add_node(dev, dest, "GLOBAL_CLK", row, col, dest)
         rc.clock_pips.update(new_clock_pips)
 
+    # Spines 6 and 7 of the top right quadrant do have a way on that isn't
+    # the DCS: the quadrant's spine mux in R19C111 picks each spine N from
+    # the centre (UNK80+N), from a mux at the right edge (UNK88+N, in R27C111
+    # and R28C111: the right side's gates, PLLs and OSC), or both bits set
+    # (UNK279..286, unknown). Gowin's IDE, made to put one PLL clock on spine
+    # 6 and then 7, sets R28C111 UNK94 <- UNK175 and R19C111 SPINE6 <- UNK94
+    # (fuse (8,115)), and R27C111 UNK95 <- UNK175 and SPINE7 <- UNK95
+    # ((8,118)), with nothing in the centre. The table's pips are there
+    # already; only the edge mux's outputs need joining to the spine mux.
+    for wire, edge_row in (('UNK94', 27), ('UNK95', 26)):
+        add_node(dev, wire, "GLOBAL_CLK", edge_row, 110, wire)
+        add_node(dev, wire, "GLOBAL_CLK", 18, 110, wire)
+
     # Start with the lower quadrants 2 and 3, since they aren't as complicated.
     # GBx0 <- GBOx
     tap_columns =  [2, 1, 0, 3]
