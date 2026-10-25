@@ -1,3 +1,4 @@
+import os
 import argparse
 import bisect
 import importlib.resources
@@ -6863,7 +6864,18 @@ class GW5AT_60B(GW5A):
 
     def get_spine_enable_fuses(self, x: int, y: int, spine_enable_table: str) -> set[Coord]:
         if self.chipdb.has_shortval(self.chipdb.get_ttyp(x, y)):
-            return self.chipdb.get_spine_enable_fuses(x, y, spine_enable_table)
+            bits = self.chipdb.get_spine_enable_fuses(x, y, spine_enable_table)
+            # EXPERIMENT: Gowin's gatecheck (spines 6 and 7 in use, no DCS)
+            # sets tables unknown_146, 147 and 149 to 1 in the centre tile
+            # (ttyp 81). PB_EXP_TABLES="146,147,149" sets those for PCLK6/7.
+            exp = os.environ.get('PB_EXP_TABLES')
+            if exp and spine_enable_table[-2:] in {'06', '07'}:
+                tabs = self.chipdb.db.shortval[self.chipdb.get_ttyp(x, y)]
+                for n in exp.split(','):
+                    tab = tabs.get(f'unknown_{n}')
+                    if tab and (1, 0) in tab:
+                        bits = set(bits) | set(tab[(1, 0)])
+            return bits
         return set()
 
     def is_clock_pip(self, tiledata: Tile, src: str, dest: str) -> bool:
