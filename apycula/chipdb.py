@@ -3198,7 +3198,11 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
                     new_clock_pips.setdefault(dest, {}).update({pclk_wire: set()})
                     print(f'Add default pip:X{col}Y{row} {dest} <- {pclk_wire}')
                     # also create PCLKxA -> PCLKx pip and node
-                    pclka_wire = f'PCLK{pclk_no}A'
+                    # PCLK6 and PCLK7 come out of the DCS, which has four
+                    # inputs, A-D. EXPERIMENT: Gowin's build of gatecheck
+                    # (no DCS) reached PCLK7 through PCLK7D, and our
+                    # routes through PCLK6A/PCLK7A were dead on the board.
+                    pclka_wire = f'PCLK{pclk_no}' + ('D' if pclk_no in {6, 7} else 'A')
                     add_node(dev, pclka_wire, "GLOBAL_CLK", row, col, pclka_wire)
                     new_clock_pips.setdefault(pclk_wire, {}).update({pclka_wire: set()})
             elif dest.startswith('PCLK'):
