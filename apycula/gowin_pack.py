@@ -6875,6 +6875,15 @@ class GW5AT_60B(GW5A):
                     tab = tabs.get(f'unknown_{n}')
                     if tab and (1, 0) in tab:
                         bits = set(bits) | set(tab[(1, 0)])
+            # EXPERIMENT: Gowin's gatecheck also ties these inputs of the
+            # centre tile R28C74 (the selectors' controls?) to constants.
+            if os.environ.get('PB_EXP_TIES') and spine_enable_table[-2:] in {'06', '07'} and (x, y) == (73, 27):
+                pips = self.chipdb.db[27, 73].pips
+                for d, src in [('A0', 'E210'), ('A1', 'N200'), ('A3', 'N210'), ('A4', 'W210'),
+                               ('A5', 'W210'), ('A6', 'W200'), ('B6', 'N250'), ('B7', 'N250'),
+                               ('CLK1', 'W242'), ('N210', 'VSS'), ('E210', 'VSS'),
+                               ('W210', 'VSS'), ('N250', 'VSS')]:
+                    bits = set(bits) | set(pips[d][src])
             return bits
         return set()
 
