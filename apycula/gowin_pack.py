@@ -6898,9 +6898,46 @@ class GW5AT_60B(GW5A):
     def is_clock_pip(self, tiledata: Tile, src: str, dest: str) -> bool:
         if src not in wnames.clknumbers:
             return False
-        if not (dest in wnames.clknumbers or dest in {'GT00', 'GT10', 'LEAP_GT00', 'LEAP_GT10'}):
+        if not (dest in wnames.clknumbers or dest in {'GT00', 'GT10', 'LEAP_GT00', 'LEAP_GT10'}
+                or dest in self._dcs_inputs):
             return False
         return wnames.clknumbers[src] < 580
+
+    # The DCS's inputs, named as the other series name them (chipdb:
+    # fse_create_5a60_clocks); their muxes are PCLK6A-D's and PCLK7A-D's.
+    _dcs_inputs = {f'P1{spine}{port}' for spine in (6, 7) for port in 'ABCD'}
+
+    # DCS_MODE: fuses in row 12 of cell R28C74, columns 86-94 for spine 6's
+    # DCS and 95-103 for spine 7's. Decoded from Gowin IDE builds of the two
+    # DCS in every mode, each mode on each DCS (PectinOS dcsref, 2026-10-26).
+    _dcs_mode_cols = {
+        6: {'RISING': (86, 92), 'FALLING': (88, 89, 90, 91, 93),
+            'CLK0': (88, 90, 91, 93), 'CLK1': (86, 88, 90, 91, 92, 93),
+            'CLK2': (88, 89, 93, 94), 'CLK3': (86, 88, 89, 92, 93, 94),
+            'GND': (88, 89, 90, 91, 93, 94), 'VCC': (86, 88, 89, 90, 91, 92, 93, 94),
+            'CLK0_GND': (90, 91), 'CLK1_GND': (89, 94),
+            'CLK2_GND': (89, 90, 91, 94), 'CLK3_GND': (88, 93),
+            'CLK0_VCC': (86, 90, 91, 92), 'CLK1_VCC': (86, 89, 92, 94),
+            'CLK2_VCC': (86, 89, 90, 91, 92, 94), 'CLK3_VCC': (86, 88, 92, 93)},
+        7: {'RISING': (96, 103), 'FALLING': (95, 97, 98, 99, 101),
+            'CLK0': (95, 97, 98, 101), 'CLK1': (95, 96, 97, 98, 101, 103),
+            'CLK2': (98, 99, 100, 101), 'CLK3': (96, 98, 99, 100, 101, 103),
+            'GND': (95, 97, 98, 99, 100, 101), 'VCC': (95, 96, 97, 98, 99, 100, 101, 103),
+            'CLK0_GND': (95, 97), 'CLK1_GND': (99, 100),
+            'CLK2_GND': (95, 97, 99, 100), 'CLK3_GND': (98, 101),
+            'CLK0_VCC': (95, 96, 97, 103), 'CLK1_VCC': (96, 99, 100, 103),
+            'CLK2_VCC': (95, 96, 97, 99, 100, 103), 'CLK3_VCC': (96, 98, 101, 103)},
+    }
+
+    def get_DCS_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        # DCSs without DCS_MODE are unused
+        if 'DCS_MODE' not in bel.cell.attrs:
+            return []
+        spine = int(self.chipdb.get_dcs_spine(bel.x, bel.y, bel.idx_int)[4:])
+        mode = bel.cell.attrs['DCS_MODE']
+        if mode not in self._dcs_mode_cols[spine]:
+            raise Exception(f"Unknown DCS_MODE {mode} for {bel.cell.name}")
+        return [CellFuseBits(bel.x, bel.y, {(12, col) for col in self._dcs_mode_cols[spine][mode]})]
 
     def get_clock_pip_fuses(self, tiledata: Tile, x: int, y: int, src: str, dest: str) -> list[CellFuseBits]:
         """ The mux for clock wires can be "spread" across several cells. """

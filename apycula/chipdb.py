@@ -3464,6 +3464,40 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
     for dest, src in (('GT00', 'SPINE2'), ('GT10', 'SPINE6')):
         tap_cell.clock_pips.get(dest, {}).pop(src, None)
 
+    # The 60B has two DCS, one for spine 6 and one for spine 7 of every
+    # quadrant, both in the centre. Their clock inputs are PCLK6A-D and
+    # PCLK7A-D (PCLK6A's mux is in R28C74, the rest in R19C74), their
+    # outputs PCLK6 and PCLK7, and their select inputs plain wires of
+    # R28C74. Found by Gowin IDE builds of two DCS with one-hot constant
+    # CLKSELs, SELFORCE set on one, and one DCS's inputs reversed
+    # (PectinOS dcsref, 2026-10-26).
+    # The DCS's inputs get names of their own (P16A-D, P17A-D, as the other
+    # series name them) with the same pips as PCLK6A-D/PCLK7A-D, so a design
+    # with no DCS keeps its plain way onto spines 6 and 7 (PCLK6D -> PCLK6,
+    # with the selects tied by gowin_pack) and a DCS's inputs lead nowhere
+    # but through it.
+    dcs_row, dcs_col = 27, 73   # R28C74; the inputs' muxes in R28C74 and R19C74
+    dcs_selects = {
+            6: (['A3', 'A4', 'A5', 'A6'], 'A7'),
+            7: (['B6', 'B7', 'A0', 'A1'], 'A2'),
+    }
+    extra_func = dev.extra_func.setdefault((dcs_row, dcs_col), {})
+    dcs_block = extra_func.setdefault('dcs', {})
+    for idx, spine in enumerate((6, 7)):
+        dcs = dcs_block.setdefault(idx, {})
+        dcs['clkout'] = f'PCLK{spine}'
+        add_node(dev, f'PCLK{spine}', "GLOBAL_CLK", dcs_row, dcs_col, f'PCLK{spine}')
+        dcs['clk'] = []
+        for port in "ABCD":
+            wire = f'P1{spine}{port}'
+            mux_row = dcs_row if (spine, port) == (6, 'A') else 18
+            mux_cell = dev[mux_row, dcs_col]
+            mux_cell.clock_pips[wire] = dict(mux_cell.clock_pips[f'PCLK{spine}{port}'])
+            add_node(dev, wire, "GLOBAL_CLK", mux_row, dcs_col, wire)
+            add_node(dev, wire, "GLOBAL_CLK", dcs_row, dcs_col, wire)
+            dcs['clk'].append(wire)
+        dcs['clksel'], dcs['selforce'] = dcs_selects[spine]
+
     return
 
 # Segmented wires are those that run along each column of the chip and have
@@ -4685,7 +4719,7 @@ def set_chip_flags(dev, device):
         dev.chip_flags.append("NEED_CFGPINS_INVERSION")
         dev.chip_flags.append("HAS_5A_DSP")
 
-    if device in {'GW5A-25A'}:
+    if device in {'GW5A-25A', 'GW5AT-60B'}:
         dev.dcs_prefix = "CLKIN"
 
 def from_fse(device, fse, dat: Datfile):
