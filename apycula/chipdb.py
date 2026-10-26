@@ -3490,11 +3490,13 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
         dcs['clk'] = []
         for port in "ABCD":
             wire = f'P1{spine}{port}'
-            mux_row = dcs_row if (spine, port) == (6, 'A') else 18
-            mux_cell = dev[mux_row, dcs_col]
-            mux_cell.clock_pips[wire] = dict(mux_cell.clock_pips[f'PCLK{spine}{port}'])
-            add_node(dev, wire, "GLOBAL_CLK", mux_row, dcs_col, wire)
-            add_node(dev, wire, "GLOBAL_CLK", dcs_row, dcs_col, wire)
+            # PCLK6B's mux is split: five fuses in R19C74, two in R28C74,
+            # and gowin_pack sets a pip's fuses in every cell that has it.
+            for mux_row in (18, dcs_row):
+                mux_cell = dev[mux_row, dcs_col]
+                if f'PCLK{spine}{port}' in mux_cell.clock_pips:
+                    mux_cell.clock_pips[wire] = dict(mux_cell.clock_pips[f'PCLK{spine}{port}'])
+                add_node(dev, wire, "GLOBAL_CLK", mux_row, dcs_col, wire)
             dcs['clk'].append(wire)
         dcs['clksel'], dcs['selforce'] = dcs_selects[spine]
 
