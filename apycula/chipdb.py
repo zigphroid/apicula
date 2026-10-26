@@ -3453,6 +3453,19 @@ def fse_create_5a60_clocks(dev, device, dat: Datfile, fse):
                             dev.nodes.setdefault(node0_name, ("GLOBAL_CLK", set()))[1].add((row, tap_col, 'GT00'))
                             dev.nodes.setdefault(node1_name, ("GLOBAL_CLK", set()))[1].add((row, tap_col, 'GT10'))
 
+    # Cell (29, 74) holds two taps: column 74's own GT00/GT10 (spines 1 and
+    # 5, branches GB10/GB50) and column 73's as LEAP_GT00/LEAP_GT10 (spines 2
+    # and 6). Spines 2 and 6 join the cell for the LEAP pips, which leaves the
+    # table's GT00 <- SPINE2 and GT10 <- SPINE6 routable too; but a GT pip's
+    # fuses are the same whatever the spine (the tap only switches on its
+    # column's own), so on the chip those two deliver spines 1 and 5. A clock
+    # routed that way never reached GB10/GB50 in rows 19-37 of columns 73-76
+    # (PectinOS pkdbg, five seeds out of ten). Spines 2 and 6 reach this
+    # cell's branches only through the LEAP pips.
+    tap_cell = dev[29, special_spine_col]
+    for dest, src in (('GT00', 'SPINE2'), ('GT10', 'SPINE6')):
+        tap_cell.clock_pips.get(dest, {}).pop(src, None)
+
     return
 
 # Segmented wires are those that run along each column of the chip and have
