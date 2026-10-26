@@ -6701,6 +6701,35 @@ class GW5AT_60B(GW5A):
         'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
     }
 
+    # Spines 6 and 7 reach the quadrants from the centre through the DCS,
+    # whose input D is PCLK6D/PCLK7D (cell R19C74). The DCS's select inputs
+    # are ordinary wires of cell R28C74, and left floating it passes no
+    # clock. With no DCS in the design Gowin's IDE ties them to constants,
+    # as below: A6 and A1 to VCC (W200 and N200 sit at VCC unless driven),
+    # the others to VSS. Found by Gowin IDE builds of one clock on one spine
+    # (2026-10-26) and checked on a Tang Console 60K: without these the
+    # clocks on spines 6 and 7 never arrive, with them they run.
+    _dcs_static_ties_cell = (27, 73)
+    _dcs_static_ties = {
+        'PCLK6D': [('N210', 'VSS'), ('W210', 'VSS'), ('A3', 'N210'), ('A4', 'W210'), ('A5', 'W210'), ('A6', 'W200')],
+        'PCLK7D': [('E210', 'VSS'), ('N250', 'VSS'), ('A0', 'E210'), ('A1', 'N200'), ('B6', 'N250'), ('B7', 'N250')],
+    }
+
+    def get_all_pips_fuses(self, pips: Iterator[PipDesc]) -> list[CellFuseBits]:
+        pips = list(pips)
+        fuses = super().get_all_pips_fuses(pips)
+        tie_y, tie_x = self._dcs_static_ties_cell
+        used = {pip.dest for pip in pips if (pip.x, pip.y) == (tie_x, tie_y)}
+        tiledata = self.chipdb.get_tiledata(tie_x, tie_y)
+        for spine_input in sorted({pip.dest for pip in pips} & self._dcs_static_ties.keys()):
+            for dest, src in self._dcs_static_ties[spine_input]:
+                if dest in used:
+                    raise Exception(f"X{tie_x}Y{tie_y}/{dest} is needed to tie the DCS for {spine_input}, but the design routes through it")
+                bits = self.get_simple_pip_fuses(tiledata, src, dest)
+                if bits:
+                    fuses.append(CellFuseBits(tie_x, tie_y, bits))
+        return fuses
+
     def get_io_bank_fuses(self) -> list[CellFuseBits]:
         # Each bank has one fuse that powers its differential receivers. The
         # bank table lists it under every differential IO_TYPE with PADDI
