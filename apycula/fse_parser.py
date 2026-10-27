@@ -6,24 +6,31 @@ def read_int(f, w):
     val = int.from_bytes(f.read(w), 'little', signed=True)
     return val
 
-def read_fse(f, device):
+# Row widths that changed in Gowin 1.9.12 (the GW5A files; found by walking
+# the tables of GW5A-25A, GW5AT-60B and GW5AST-138C): drpfuse (0x8b) rows
+# are 30 wide instead of 10, and longfuse tables 0x35 and 0x36 are 14 wide
+# instead of 17.
+WIDTHS_1912 = {0x8b: 30, 0x35: 14, 0x36: 14}
+
+def read_fse(f, device, widths=None):
     print("check", read_int(f, 4))
+    widths = widths or {}
     tiles = {}
     ttyp = read_int(f, 4)
     #print(f"tile type:{ttyp}/{hex(ttyp)}")
-    tiles['header'] = read_one_file(f, ttyp, device)
+    tiles['header'] = read_one_file(f, ttyp, device, widths)
     while True:
         ttyp = read_int(f, 4)
         if ttyp == 0x9a1d85: break
         #print(f"tile type:{ttyp}/{hex(ttyp)}")
-        tiles[ttyp] = read_one_file(f, ttyp, device)
+        tiles[ttyp] = read_one_file(f, ttyp, device, widths)
     return tiles
 
 def read_table(f, size1, size2, w=2):
     return [[read_int(f, w) for j in range(size2)]
                         for i in range(size1)]
 
-def read_one_file(f, tile_type, device):
+def read_one_file(f, tile_type, device, widths={}):
     tmap = {"height": read_int(f, 4),
             "width": read_int(f, 4)}
     tables = read_int(f, 4)
@@ -95,7 +102,7 @@ def read_one_file(f, tile_type, device):
             t = read_table(f, size, 3, 2)
         elif typ in {0x12, 0x13, 0x35, 0x36, 0x3a}:
             typn = "longfuse"
-            t = read_table(f, size, 17, 2)
+            t = read_table(f, size, widths.get(typ, 17), 2)
         elif typ in {0x17, 0x18, 0x25, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f}:
             typn = "longval"
             t = read_table(f, size, 28, 2)
@@ -113,7 +120,7 @@ def read_one_file(f, tile_type, device):
             t = read_table(f, size, 3, 2)
         elif typ == 0x8b:
             typn = "drpfuse"
-            t = read_table(f, size, 10, 2)
+            t = read_table(f, size, widths.get(typ, 10), 2)
         elif typ == 0x9a: # 60K
             typn = "logicinfo"
             t = read_table(f, size, 3, 2)
