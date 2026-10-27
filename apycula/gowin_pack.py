@@ -6722,9 +6722,14 @@ class GW5AT_60B(GW5A):
         used = {pip.dest for pip in pips if (pip.x, pip.y) == (tie_x, tie_y)}
         tiledata = self.chipdb.get_tiledata(tie_x, tie_y)
         for spine_input in sorted({pip.dest for pip in pips} & self._dcs_static_ties.keys()):
-            for dest, src in self._dcs_static_ties[spine_input]:
-                if dest in used:
-                    raise Exception(f"X{tie_x}Y{tie_y}/{dest} is needed to tie the DCS for {spine_input}, but the design routes through it")
+            ties = self._dcs_static_ties[spine_input]
+            # A tie's own wires, and the wires left to sit at VCC (W200,
+            # N200): a design net on either would move a select input.
+            tie_wires = {dest for dest, _ in ties} | {src for _, src in ties if src not in {'VSS', 'VCC'}}
+            clash = sorted(tie_wires & used)
+            if clash:
+                raise Exception(f"X{tie_x}Y{tie_y}/{clash[0]} is needed to tie the DCS for {spine_input}, but the design routes through it")
+            for dest, src in ties:
                 bits = self.get_simple_pip_fuses(tiledata, src, dest)
                 if bits:
                     fuses.append(CellFuseBits(tie_x, tie_y, bits))
