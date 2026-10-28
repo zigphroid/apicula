@@ -2248,6 +2248,10 @@ class Device:
             self.chipdb.get_iologic_attr_val(attr_val, av)
         return av
 
+    def iologic_fuse_cell(self, bel: IologicBelDesc) -> tuple[int, int]:
+        """ The cell that holds an IOLOGIC's fuses: its own, on most chips """
+        return bel.x, bel.y
+
     def make_IologicBelDesc(self, bel: BelDesc) -> IologicBelDesc:
         return IologicBelDesc(bel.x, bel.y, bel.idx_str, bel.cell, bel.fclk, bel.main_cell_outmode, bel.main_cell_inmode)
 
@@ -2259,9 +2263,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def common_in_iologic_handler(self, bel: IologicBelDesc) -> list[CellFuseBits]:
@@ -2272,9 +2277,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
 
@@ -2285,9 +2291,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def get_ODDRC_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -2312,9 +2319,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def get_IDDRC_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -2343,9 +2351,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def get_IOLOGICI_EMPTY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -2354,9 +2363,10 @@ class Device:
 
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def get_IOLOGICO_EMPTY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -2365,9 +2375,10 @@ class Device:
 
 
         fuses = []
-        bits = self.chipdb.get_iologic_fuses(iol_bel.x, iol_bel.y, av, iol_bel.idx_str)
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         if bits:
-            fuses.append(CellFuseBits(iol_bel.x, iol_bel.y, bits))
+            fuses.append(CellFuseBits(x, y, bits))
         return fuses
 
     def get_IOLOGIC_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -6785,14 +6796,23 @@ class GW5AT_60B(GW5A):
             attr_vals = [a for a in attr_vals if a.attr not in ('OUTMODE', 'ISI')]
             attr_vals.append(AttrVal('OCLKCE', 'CE'))
         av = self.set_iologic_attrvals(iol_bel, attr_vals)
-        x, y = iol_bel.x, iol_bel.y
-        if iol_bel.idx_str == 'B':
+        x, y = self.iologic_fuse_cell(iol_bel)
+        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
+        return [CellFuseBits(x, y, bits)] if bits else []
+
+    def iologic_fuse_cell(self, bel: IologicBelDesc) -> tuple[int, int]:
+        # The B half of a 60B IO pair keeps its IOLOGIC fuses in the cell of
+        # its IOBB (fuse_cell_offset: the next column on the top and bottom
+        # edges, the next row on the right), where the IOLOGICB table is; its
+        # own cell's IOLOGICB table is empty. Every IOLOGIC on the B half
+        # (ODDR, IDDR, the serializers, an OSER10's aux half) writes there.
+        x, y = bel.x, bel.y
+        if bel.idx_str == 'B':
             off = self.chipdb.get_iob_fuse_cell_offset(x, y, 'B')
             if off:
                 x += off[1]
                 y += off[0]
-        bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
-        return [CellFuseBits(x, y, bits)] if bits else []
+        return x, y
 
     def get_out_iologic_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
         attr_vals = super().get_out_iologic_attrs(bel)
