@@ -1780,13 +1780,17 @@ class Device:
         # Bank fuses
         for bank, bank_desc in self.io_banks.items():
             av = set()
-            for attrval in bank_desc.get_attrs():
+            for attrval in [*bank_desc.get_attrs(), *self.get_device_io_attrs()]:
                 self.chipdb.get_bank_attr_val(attrval, av)
             bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
             bits.update(self.chipdb.get_bank_io_fuses(bank_desc.x, bank_desc.y, av))
             if bits:
                 fuses.append(CellFuseBits(bank_desc.x, bank_desc.y, bits))
         return fuses
+
+    def get_device_io_attrs(self) -> list[AttrVal]:
+        """ Attributes every IO and bank of the device carries """
+        return []
 
     def check_io_banks(self):
         """ Check BANK IO_TYPE and VCCIO """
@@ -6746,6 +6750,24 @@ class GW5AT_60B(GW5A):
                 if bits:
                     fuses.append(CellFuseBits(tie_x, tie_y, bits))
         return fuses
+
+    def get_device_io_attrs(self) -> list[AttrVal]:
+        # The 60B's IOB and BANK tables give DRIVE (with IO_TYPE and
+        # OPENDRAIN) and a bank's VCCIO fuse only together with attribute
+        # 65, which the IDE sets to 3.3 (1.9.12). Without it no output got
+        # its drive strength fuses: the IDE's builds of an LVCMOS15 and an
+        # SSTL15_I IOBUF on AB3 have them, ours had none.
+        return [AttrVal('IOB_UNKNOWN65', '3.3')]
+
+    def set_io_attrvals(self, bel: IoBelDesc, default_attrs: list[tuple[str, str]], defaults_only = False, force_attrs: dict[str, str] = dict()) -> set[int]:
+        av = super().set_io_attrvals(bel, default_attrs, defaults_only, force_attrs)
+        # Single-ended outputs only, so far: the IDE leaves the drive fuses
+        # off an unused pin, and its inputs and LVDS pins haven't been
+        # compared.
+        if bel.cell.typ in {'OBUF', 'TBUF', 'IOBUF'}:
+            for attrval in self.get_device_io_attrs():
+                self.chipdb.get_iob_attr_val(attrval, av)
+        return av
 
     def get_io_bank_fuses(self) -> list[CellFuseBits]:
         # Each bank has one fuse that powers its differential receivers. The
