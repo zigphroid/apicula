@@ -68,6 +68,7 @@ iob_attrids = {
         'IOB_UNKNOWN61':         61,
         'IOB_UNKNOWN62':         62,
         'IOB_GW5_VCCX_64':       64,
+        'IOB_UNKNOWN65':         65,
         'IOB_UNKNOWN66':         66,
         'IOB_UNKNOWN67':         67,
         'IOB_GW5_ADC_IN':        68,
@@ -269,9 +270,11 @@ iob_attrvals = {
             # 5A ADC
             'UNKNOWN247':       247,
             'UNKNOWN254':       254,
-            # A referenced SSTL15 input: Gowin's IDE refuses IO_TYPE=SSTL15 on an
-            # input and writes 254 for SSTL15_I (GW5AT-60B, IDE 1.9.12)
-            'SSTL15_I':         254,
+            # A referenced SSTL15 input or bidirectional pin: Gowin's IDE refuses
+            # IO_TYPE=SSTL15 on one and builds SSTL15_I (GW5AT-60B, IDE 1.9.12).
+            # 252, 253 and 254 give the same input and bank fuses; an IOBUF's
+            # drive fuses are 253's.
+            'SSTL15_I':         253,
             'GW5_ADC_IN':       255,
 
             # 5A
