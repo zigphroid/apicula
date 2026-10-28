@@ -835,7 +835,8 @@ class BankDesc:
                 'LVCMOS33': '3.3', 'LVDS25': '2.5', 'LVDS25E': '2.5', 'LVCMOS33D': '3.3', 'LVCMOS_D': '3.3', 'MIPI': '1.2',
                 'SSTL15': '1.5', 'SSTL18_I': '1.8', 'SSTL18_II': '1.8', 'SSTL25_I': '2.5', 'SSTL25_II': '2.5',
                 'SSTL33_I': '3.3', 'SSTL33_II': '3.3', 'SSTL15D': '1.5', 'SSTL18D_I': '1.8', 'SSTL18D_II': '1.8',
-                'SSTL25D_I': '2.5', 'SSTL25D_II': '2.5', 'SSTL33D_I': '3.3', 'SSTL33D_II': '3.3', 'MIPI': '2.5'}
+                'SSTL25D_I': '2.5', 'SSTL25D_II': '2.5', 'SSTL33D_I': '3.3', 'SSTL33D_II': '3.3', 'MIPI': '2.5',
+                'SSTL15_I': '1.5'}
 
     def __init__(self, x: int, y: int):
         self.x, self.y = x, y
@@ -6762,6 +6763,20 @@ class GW5AT_60B(GW5A):
                 av = set()
                 self.chipdb.get_bank_attr_val(AttrVal('IO_TYPE', io_type), av)
                 self.chipdb.get_bank_attr_val(AttrVal('PADDI', 'PADDI'), av)
+                bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
+                if bits:
+                    fuses.append(CellFuseBits(bank_desc.x, bank_desc.y, bits))
+            # An SSTL15_I input compares the pad against the bank's VREF. The
+            # bank's own IO_TYPE comes from its other IOs, so set the
+            # referenced input's bank fuses here, with the bank's internal
+            # VREF generator on: the IDE's VREF=INTERNAL, which is also what
+            # it builds when no VREF is given (GW5AT-60B, IDE 1.9.12). An
+            # external VREF (VREF1_LOAD, with a VREF1_DRIVER pin) isn't done.
+            if any(bel.cell.typ in {'IBUF', 'IOBUF'} and bel.cell.attrs.get('IO_TYPE') == 'SSTL15_I'
+                   for bel in bank_desc.bels):
+                av = set()
+                for attr, val in (('IO_TYPE', 'SSTL15_I'), ('PADDI', 'PADDI'), ('VREF', 'INTERNAL')):
+                    self.chipdb.get_bank_attr_val(AttrVal(attr, val), av)
                 bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
                 if bits:
                     fuses.append(CellFuseBits(bank_desc.x, bank_desc.y, bits))

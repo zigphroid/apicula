@@ -269,6 +269,9 @@ iob_attrvals = {
             # 5A ADC
             'UNKNOWN247':       247,
             'UNKNOWN254':       254,
+            # A referenced SSTL15 input: Gowin's IDE refuses IO_TYPE=SSTL15 on an
+            # input and writes 254 for SSTL15_I (GW5AT-60B, IDE 1.9.12)
+            'SSTL15_I':         254,
             'GW5_ADC_IN':       255,
 
             # 5A
