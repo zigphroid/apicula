@@ -3820,6 +3820,14 @@ def fse_create_tile_types(dev, device, dat: Datfile):
         for col, fn in enumerate(rd):
             if fn == '4' and device in {'GW5A-25A', 'GW5AST-138C'}:
                 fn = 'I'
+            # '4' marks an I/O tile with a single pin. On the GW5AT-60B these
+            # are X0Y64 (L6, the Mega 60K's DDR3 RESET#), X146Y46 (J16) and
+            # X146Y55 (M17); without 'I' nextpnr makes no IOB bel there. The
+            # fourth, X0Y21, sits among the tiles without wires (440), which
+            # must stay out of 'I'.
+            if (fn == '4' and device in {'GW5AT-60B'}
+                    and dev.grid[min(max(row - 1, 0), dev.rows - 1)][min(max(col - 1, 0), dev.cols - 1)] != 440):
+                fn = 'I'
             if fn == ' ' and device in {'GW5AT-60B'}:
                 # tiles without wires
                 fn = 'E'
