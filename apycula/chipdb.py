@@ -5276,12 +5276,17 @@ _gw5_60b_io = {
 # The GW5AT-60B's IOL27 pair (PBGA484 pins E1 and D1; D1 is the Tang
 # Console 60K's DDR3 A14) sits in cell (26, 0), an empty cell (ttyp 440)
 # like the rest of the left edge between rows 17 and 27, and the fse gives
-# it no IOB at all. Gowin IDE builds of a LUT driving D1 and E1 (LVCMOS15,
-# 2026-10-28) set no fuses of the pad's own: only the routing to its inputs
-# in row 28, and an output register there when it was packed into one.
-# A's data is D1 and B's is C2 of the cell below, each pin's OE C1 of its
-# own cell, held low (VSS) for an output. No input has been found, so these
-# are output only: O is a wire that goes nowhere.
+# it no IOB at all. Its pads are driven from row 28: A's from X6Y28, B's
+# from X7Y28, the cells' IOLOGIC. Gowin IDE builds (2026-10-28) show:
+# - a LUT driving the pin routes to D1 (A) or C2 (B), with no IOLOGIC
+#   mode set; on the Tang Console 60K such a pin never reached the DDR3
+#   (runs 10-13), so that path is modelled but doesn't drive the pad;
+# - an ODDR sets two mode bits in the pin's cell (gowin_pack), its D0 and
+#   D1 on A0 and C3 (A) or D1 and C3 (B), its clock on CLK0, as the
+#   IologicA/BIn tables say for the pair in X0Y28;
+# - each pin's OE is C1 of its cell, held at VSS for an output (gowin_pack
+#   ties it when nothing routes it).
+# No input has been found, so these are output only: O goes nowhere.
 _gw5_60b_iol27 = {
         'A': ((28, 6), {'I': 'D1', 'OE': 'C1'}),
         'B': ((28, 7), {'I': 'C2', 'OE': 'C1'}),
@@ -5295,8 +5300,11 @@ def add_60b_iol27_bels(dev):
     row, col = _gw5_60b_iol27_cell
     tile = copy.deepcopy(dev[row, col])
     tile.ttyp = _gw5_60b_iol27_ttyp
-    for pin in _gw5_60b_iol27:
-        tile.bels[f'IOB{pin}'] = Bel()
+    for pin, (loc, _) in _gw5_60b_iol27.items():
+        # where the pin's IOLOGIC fuses go (gowin_pack)
+        off = (loc[0] - row, loc[1] - col)
+        tile.bels[f'IOB{pin}'] = Bel(fuse_cell_offset = off)
+        tile.bels[f'IOLOGIC{pin}'] = Bel()
     for types in dev.tile_types.values():
         if dev.grid[row][col] in types:
             types.add(tile.ttyp)
@@ -5309,6 +5317,20 @@ def create_60b_iol27_portmap(dev, row, col, pin, bel):
         add_node(dev, nodename, f"IO_{port[0]}", row, col, f'IOB{pin}_{wire}')
         bel.portmap[port] = f'IOB{pin}_{wire}'
     bel.portmap['O'] = f'IOB{pin}_NO_INPUT'
+
+def create_60b_iol27_iologic_portmap(dat, dev, row, col, pin, bel):
+    # Outputs only (the ODDR family): its inputs, from the IologicA/BIn
+    # tables, are wires of the pin's cell in row 28.
+    loc = _gw5_60b_iol27[pin][0]
+    for idx, nam in _iologic_inputs:
+        w_idx = dat.compat_dict[f'Iologic{pin}In'][idx]
+        if w_idx < 0 or nam in {'FCLK', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15'}:
+            continue
+        wire = wnames.wirenames[w_idx]
+        local = f'IOLOGIC{pin}_{wire}'
+        nodename = add_node(dev, f'X{col}Y{row}/{local}', "IO_I", loc[0], loc[1], wire)
+        add_node(dev, nodename, "IO_I", row, col, local)
+        bel.portmap[nam] = local
 
 def create_GW5A_io_portmap(dat, dev, device, row, col, belname, bel, tile):
     pin = belname[-1]
@@ -5380,6 +5402,9 @@ def dat_portmap(dat, dev, device):
                 if bel.portmap:
                     if not need_create_multiple_nodes(device, name):
                         continue
+                if device == 'GW5AT-60B' and (row, col) == _gw5_60b_iol27_cell and name.startswith('IOLOGIC'):
+                    create_60b_iol27_iologic_portmap(dat, dev, row, col, name[-1], bel)
+                    continue
                 if name.startswith("IOB"):
                     if is_GW5_family(device):
                         create_GW5A_io_portmap(dat, dev, device, row, col, name, bel, tile)
