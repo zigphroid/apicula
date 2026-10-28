@@ -1780,7 +1780,7 @@ class Device:
         # Bank fuses
         for bank, bank_desc in self.io_banks.items():
             av = set()
-            for attrval in [*bank_desc.get_attrs(), *self.get_device_io_attrs()]:
+            for attrval in [*bank_desc.get_attrs(), *self.get_bank_extra_attrs(bank_desc)]:
                 self.chipdb.get_bank_attr_val(attrval, av)
             bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
             bits.update(self.chipdb.get_bank_io_fuses(bank_desc.x, bank_desc.y, av))
@@ -1791,6 +1791,9 @@ class Device:
     def get_device_io_attrs(self) -> list[AttrVal]:
         """ Attributes every IO and bank of the device carries """
         return []
+
+    def get_bank_extra_attrs(self, bank_desc: BankDesc) -> list[AttrVal]:
+        return self.get_device_io_attrs()
 
     def check_io_banks(self):
         """ Check BANK IO_TYPE and VCCIO """
@@ -1826,6 +1829,16 @@ class Device:
         """ Set additional atribute for input resistor """
         if val != 'OFF' and bel.cell.typ in {'IBUF', 'IOBUF', 'TLVDS_IBUF', 'TLVDS_IOBUF', 'ELVDS_IBUF', 'ELVDS_IOBUF'}:
             self.chipdb.get_iob_attr_val(AttrVal('DDR_DYNTERM', 'ON'), av)
+
+    def get_bank_extra_attrs(self, bank_desc: BankDesc) -> list[AttrVal]:
+        # With 65, a bank's BANK_VCCIO below 3.3 sets a low-VCCIO fuse, so
+        # only where the VCCIO is known: from the bank's single-ended
+        # outputs. A bank of inputs alone gets VCCIO 1.2 here, and one with
+        # LVDS outputs the LVDS VCCIO; on the Tang Console 60K's 3.3 V banks
+        # that fuse lost pbshow's link.
+        if bank_desc.has_outputs and not bank_desc.has_lvds_outputs:
+            return self.get_device_io_attrs()
+        return []
 
     def set_io_attrvals(self, bel: IoBelDesc, default_attrs: list[tuple[str, str]], defaults_only = False, force_attrs: dict[str, str] = dict()) -> set[int]:
         """ Set IO attributes in addition to those specified in default. Or use only default. """
