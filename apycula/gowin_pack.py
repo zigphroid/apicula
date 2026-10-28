@@ -6764,6 +6764,13 @@ class GW5AT_60B(GW5A):
                     fuses.append(CellFuseBits(tie_x, tie_y, bits))
         return fuses
 
+    def get_iob_fuses(self, x: int, y: int, idx_str: str, av: set[int]) -> list[CellFuseBits]:
+        # IOL27 (E1, D1) has no fuses of its own, used or not: see
+        # chipdb._gw5_60b_iol27.
+        if (y, x) == chipdb._gw5_60b_iol27_cell:
+            return []
+        return super().get_iob_fuses(x, y, idx_str, av)
+
     def get_device_io_attrs(self) -> list[AttrVal]:
         # The 60B's IOB and BANK tables give DRIVE (with IO_TYPE and
         # OPENDRAIN) and a bank's VCCIO fuse only together with attribute

@@ -5273,6 +5273,43 @@ _gw5_60b_io = {
         (2, 145, 'A')  : ((3, 144), { 'I': 'A0', 'OE': 'A6', 'O': 'Q5'}) ,         # TMS
         (2, 145, 'B')  : ((3, 144), { 'I': 'B6', 'OE': 'B7', 'O': 'Q6'}) ,         # TDO
 }
+# The GW5AT-60B's IOL27 pair (PBGA484 pins E1 and D1; D1 is the Tang
+# Console 60K's DDR3 A14) sits in cell (26, 0), an empty cell (ttyp 440)
+# like the rest of the left edge between rows 17 and 27, and the fse gives
+# it no IOB at all. Gowin IDE builds of a LUT driving D1 and E1 (LVCMOS15,
+# 2026-10-28) set no fuses of the pad's own: only the routing to its inputs
+# in row 28, and an output register there when it was packed into one.
+# A's data is D1 and B's is C2 of the cell below, each pin's OE C1 of its
+# own cell, held low (VSS) for an output. No input has been found, so these
+# are output only: O is a wire that goes nowhere.
+_gw5_60b_iol27 = {
+        'A': ((28, 6), {'I': 'D1', 'OE': 'C1'}),
+        'B': ((28, 7), {'I': 'C2', 'OE': 'C1'}),
+}
+_gw5_60b_iol27_cell = (26, 0)
+_gw5_60b_iol27_ttyp = 1440
+
+def add_60b_iol27_bels(dev):
+    """ A cell type of its own for IOL27, so its bels land in that one cell
+    and not in every empty one. """
+    row, col = _gw5_60b_iol27_cell
+    tile = copy.deepcopy(dev[row, col])
+    tile.ttyp = _gw5_60b_iol27_ttyp
+    for pin in _gw5_60b_iol27:
+        tile.bels[f'IOB{pin}'] = Bel()
+    for types in dev.tile_types.values():
+        if dev.grid[row][col] in types:
+            types.add(tile.ttyp)
+    dev[row, col] = tile
+
+def create_60b_iol27_portmap(dev, row, col, pin, bel):
+    loc, ports = _gw5_60b_iol27[pin]
+    for port, wire in ports.items():
+        nodename = add_node(dev, f'X{col}Y{row}/IOB{pin}_{port}', f"IO_{port[0]}", loc[0], loc[1], wire)
+        add_node(dev, nodename, f"IO_{port[0]}", row, col, f'IOB{pin}_{wire}')
+        bel.portmap[port] = f'IOB{pin}_{wire}'
+    bel.portmap['O'] = f'IOB{pin}_NO_INPUT'
+
 def create_GW5A_io_portmap(dat, dev, device, row, col, belname, bel, tile):
     pin = belname[-1]
     if device in {'GW5A-25A'}:
@@ -5292,6 +5329,9 @@ def create_GW5A_io_portmap(dat, dev, device, row, col, belname, bel, tile):
             bel.portmap['ADCEN'] = adcen
             return
     elif device in {'GW5AT-60B'}:
+        if (row, col) == _gw5_60b_iol27_cell:
+            create_60b_iol27_portmap(dev, row, col, pin, bel)
+            return
         if (row, col, pin) in _gw5_60b_io:
             loc = _gw5_60b_io[row, col, pin][0]
             for port_wire in _gw5_60b_io[row, col, pin][1].items():

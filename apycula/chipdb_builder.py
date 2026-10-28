@@ -463,6 +463,7 @@ def main():
         chipdb.fill_GW5A_io_bels(db)
         if device == 'GW5AT-60B':
             fix_60b_iobb_diff(db, diff_cap_info)
+            chipdb.add_60b_iol27_bels(db)
     chipdb.dat_fill_io_cfgs(db, dat, device, db.pinout[params['device']][params['package']])
 
     pad_locs = pindef.get_pll_pads_locs(params['device'], params['package'])
