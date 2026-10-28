@@ -5277,13 +5277,16 @@ _gw5_60b_io = {
 # Console 60K's DDR3 A14) sits in cell (26, 0), an empty cell (ttyp 440)
 # like the rest of the left edge between rows 17 and 27, and the fse gives
 # it no IOB at all. Its pads are driven from row 28: A's from X6Y28, B's
-# from X7Y28, the cells' IOLOGIC. Gowin IDE builds (2026-10-28) show:
-# - a LUT driving the pin routes to D1 (A) or C2 (B), with no IOLOGIC
-#   mode set; on the Tang Console 60K such a pin never reached the DDR3
-#   (runs 10-13), so that path is modelled but doesn't drive the pad;
-# - an ODDR sets two mode bits in the pin's cell (gowin_pack), its D0 and
-#   D1 on A0 and C3 (A) or D1 and C3 (B), its clock on CLK0, as the
-#   IologicA/BIn tables say for the pair in X0Y28;
+# from X7Y28 (ttyp 408, whose IOB and IOLOGIC tables are empty). Gowin IDE
+# builds (2026-10-28) and the Tang Console 60K show:
+# - each pad is driven only through a register in its cell: data on D1
+#   (A) or C2 (B), clock CLK0, enable CE0, reset LSR0. The register has
+#   no mode fuses, only routing. Unrouted, LSR0 sits at VCC and holds it
+#   in reset: a pin driven straight from a LUT never moved (runs 10-14),
+#   the IDE's build with the register clocked and LSR0 low passed all of
+#   the DDR3 (run 15). So the pin takes an output register (IOBFF) and
+#   nothing else, and gowin_pack ties LSR0 low when the design has no
+#   reset;
 # - each pin's OE is C1 of its cell, held at VSS for an output (gowin_pack
 #   ties it when nothing routes it).
 # No input has been found, so these are output only: O goes nowhere.
@@ -5318,15 +5321,14 @@ def create_60b_iol27_portmap(dev, row, col, pin, bel):
         bel.portmap[port] = f'IOB{pin}_{wire}'
     bel.portmap['O'] = f'IOB{pin}_NO_INPUT'
 
+# IOL27's register, as nextpnr's output register (IOLOGICO_EMPTY with
+# HAS_REG): its ports, and the wire of the pin's cell each takes.
+_gw5_60b_iol27_reg = {'CLK': 'CLK0', 'CE': 'CE0', 'RESET': 'LSR0'}
+
 def create_60b_iol27_iologic_portmap(dat, dev, row, col, pin, bel):
-    # Outputs only (the ODDR family): its inputs, from the IologicA/BIn
-    # tables, are wires of the pin's cell in row 28.
-    loc = _gw5_60b_iol27[pin][0]
-    for idx, nam in _iologic_inputs:
-        w_idx = dat.compat_dict[f'Iologic{pin}In'][idx]
-        if w_idx < 0 or nam in {'FCLK', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15'}:
-            continue
-        wire = wnames.wirenames[w_idx]
+    loc, ports = _gw5_60b_iol27[pin]
+    wires = dict(_gw5_60b_iol27_reg, D0 = ports['I'])
+    for nam, wire in wires.items():
         local = f'IOLOGIC{pin}_{wire}'
         nodename = add_node(dev, f'X{col}Y{row}/{local}', "IO_I", loc[0], loc[1], wire)
         add_node(dev, nodename, "IO_I", row, col, local)

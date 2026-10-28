@@ -6771,12 +6771,17 @@ class GW5AT_60B(GW5A):
             return []
         return super().get_iob_fuses(x, y, idx_str, av)
 
-    # IOL27's ODDR sets no mode fuses: Gowin's IDE builds of an ODDR on D1
-    # and on E1 (refoddr, 2026-10-28) differ from its plain-output builds
-    # only in routing, the clock to CLK0 among it. Ttyp 408's IOLOGIC tables
-    # are empty too. So an ODDR is these cells' one output mode.
+    # IOL27 drives its pads only through its register (chipdb._gw5_60b_iol27),
+    # which has no mode fuses: Gowin's IDE builds of it differ only in
+    # routing. Its reset is LSR0 high, and the tables give no sync/async or
+    # set mode, so it takes the register types Gowin's working build used:
+    # a rising-edge flip-flop with a reset or none.
+    _iol27_reg_types = {'DFF', 'DFFE', 'DFFR', 'DFFRE'}
     # OE held at VSS: C1 <- W230 <- VSS, as the IDE routes it.
-    _iol27_oe_ties = [('W230', 'VSS'), ('C1', 'W230')]
+    _iol27_oe_ties = [(0, 'W230', 'VSS'), (0, 'C1', 'W230')]
+    # LSR0 held low when the design has no reset, as the IDE ties it for a
+    # plain register: N270 <- VSS in the cell below, LSR0 <- N271.
+    _iol27_lsr_ties = [(1, 'N270', 'VSS'), (0, 'LSR0', 'N271')]
 
     def is_iol27(self, x: int, y: int) -> bool:
         return (y, x) == chipdb._gw5_60b_iol27_cell
@@ -6787,40 +6792,51 @@ class GW5AT_60B(GW5A):
 
     def get_ODDR_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
-            if bel.cell.parms.get('OUTMODE', 'ODDRX1') != 'ODDRX1':
-                raise Exception(f"IOL27{bel.idx_str} takes only an ODDR")
-            return []
+            raise Exception(f"IOL27{bel.idx_str} takes only an output register (IOBFF), not an ODDR")
         return super().get_ODDR_fuses(bel)
 
     def get_IOLOGICO_EMPTY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
-            return []
+            pin = bel.idx_str[-1]
+            typ = bel.cell.attrs.get('OREG_TYPE')
+            if typ not in self._iol27_reg_types:
+                raise Exception(f"IOL27{pin} takes a {', '.join(sorted(self._iol27_reg_types))} as its output register, not {typ}")
+            self._iol27_regs = getattr(self, '_iol27_regs', set()) | {pin}
+            if 'RESET' in bel.cell.connections:
+                return []
+            return self.iol27_ties(bel.x, bel.y, pin, self._iol27_lsr_ties, 'LSR0', 'reset')
         return super().get_IOLOGICO_EMPTY_fuses(bel)
 
     def get_IOLOGICI_EMPTY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
-            return []
+            raise Exception(f"IOL27{bel.idx_str[-1]} is output only")
         return super().get_IOLOGICI_EMPTY_fuses(bel)
 
     def get_all_pips_fuses(self, pips: Iterator[PipDesc]) -> list[CellFuseBits]:
         pips = list(pips)
-        # the wires IOL27's OE ties would take, if the design routes them
+        # the wires IOL27's ties would take, if the design routes them
         self._iol27_used = {(pip.x, pip.y, w) for pip in pips for w in (pip.dest, pip.src)}
         return self._get_all_pips_fuses(pips)
 
-    def iol27_oe_fuses(self, bel: IoBelDesc) -> list[CellFuseBits]:
-        x, y = self.iol27_cell(bel.x, bel.y, bel.idx_str)
+    def iol27_ties(self, x: int, y: int, pin: str, ties, port: str, what: str) -> list[CellFuseBits]:
+        x, y = self.iol27_cell(x, y, pin)
         used = getattr(self, '_iol27_used', set())
-        if (x, y, 'C1') in used:
-            # a TBUF's OEN, routed by nextpnr
+        if (x, y, port) in used:
+            # routed by nextpnr
             return []
-        if (x, y, 'W230') in used:
-            raise Exception(f"X{x}Y{y}/W230 is needed to tie IOL27{bel.idx_str}'s OE, but the design routes through it")
-        tiledata = self.chipdb.get_tiledata(x, y)
-        bits = set()
-        for dest, src in self._iol27_oe_ties:
-            bits |= self.get_simple_pip_fuses(tiledata, src, dest)
-        return [CellFuseBits(x, y, bits)]
+        fuses = []
+        for dy, dest, src in ties:
+            for w in (dest, src):
+                if w not in {'VSS', 'VCC'} and (x, y + dy, w) in used:
+                    raise Exception(f"X{x}Y{y + dy}/{w} is needed to tie IOL27{pin}'s {what}, but the design routes through it")
+            bits = self.get_simple_pip_fuses(self.chipdb.get_tiledata(x, y + dy), src, dest)
+            fuses.append(CellFuseBits(x, y + dy, bits))
+        return fuses
+
+    def iol27_oe_fuses(self, bel: IoBelDesc) -> list[CellFuseBits]:
+        if bel.idx_str not in getattr(self, '_iol27_regs', set()):
+            raise Exception(f"IOL27{bel.idx_str} drives its pad only through its register: give the output an IOBFF flip-flop")
+        return self.iol27_ties(bel.x, bel.y, bel.idx_str, self._iol27_oe_ties, 'C1', 'OE')
 
     def process_OBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
