@@ -6765,23 +6765,44 @@ class GW5AT_60B(GW5A):
         return fuses
 
     def get_iob_fuses(self, x: int, y: int, idx_str: str, av: set[int]) -> list[CellFuseBits]:
-        # IOL27 (E1, D1) has no fuses of its own, used or not: see
-        # chipdb._gw5_60b_iol27.
+        # IOL27 (E1, D1) keeps its IOB fuses in a footer slot: see
+        # chipdb._gw5_60b_iol27_slots.
         if (y, x) == chipdb._gw5_60b_iol27_cell:
+            self.iol27_slot_fuses(idx_str, av, f'IOB{idx_str}', get_longval_fuses)
             return []
         return super().get_iob_fuses(x, y, idx_str, av)
 
+    def iol27_slot_fuses(self, pin: str, av: set[int], table: str, lookup) -> None:
+        """ Set an IOL27 pin's fuses from one of its slot's tables. """
+        idx, ttyp = chipdb._gw5_60b_iol27_slots[pin]
+        bitmap = self.extra_slots.get(idx)
+        if bitmap is None:
+            bitmap = bitmatrix.zeros(*chipdb._gw5_60b_io_slot_size)
+            self.extra_slots[idx] = bitmap
+            rows, cols = chipdb._gw5_60b_io_slot_size
+            self.set_slot_bits(bitmap, {(r, c) for r in range(rows) for c in range(chipdb._gw5_60b_io_slot_fuses, cols)})
+            self.set_slot_bits(bitmap, self.chipdb.db.const.get(ttyp, []))
+        self.set_slot_bits(bitmap, lookup(self.chipdb.db, ttyp, av, table))
+
+    def get_extra_slots(self) -> dict[int, any]:
+        # IOL21-27's slots that no pin wrote get an unused pin's settings,
+        # as Gowin writes them in every build.
+        for idx, image in chipdb._gw5_60b_io_slot_unused.items():
+            if idx not in self.extra_slots:
+                bitmap = bitmatrix.zeros(*chipdb._gw5_60b_io_slot_size)
+                rows, cols = chipdb._gw5_60b_io_slot_size
+                self.set_slot_bits(bitmap, {(r, c) for r in range(rows) for c in range(chipdb._gw5_60b_io_slot_fuses, cols)})
+                self.set_slot_bits(bitmap, image)
+                self.extra_slots[idx] = bitmap
+        # in slot order, as Gowin writes them
+        return dict(sorted(self.extra_slots.items()))
+
     # IOL27 drives its pads only through its register (chipdb._gw5_60b_iol27),
-    # which has no mode fuses: Gowin's IDE builds of it differ only in
-    # routing. Its reset is LSR0 high, and the tables give no sync/async or
-    # set mode, so it takes the register types Gowin's working build used:
-    # a rising-edge flip-flop with a reset or none.
+    # whose modes are in the pin's footer slot. It takes the register types
+    # of Gowin's working builds: a rising-edge flip-flop with a reset or none.
     _iol27_reg_types = {'DFF', 'DFFE', 'DFFR', 'DFFRE'}
     # OE held at VSS: C1 <- W230 <- VSS, as the IDE routes it.
     _iol27_oe_ties = [(0, 'W230', 'VSS'), (0, 'C1', 'W230')]
-    # LSR0 held low when the design has no reset, as the IDE ties it for a
-    # plain register: N270 <- VSS in the cell below, LSR0 <- N271.
-    _iol27_lsr_ties = [(1, 'N270', 'VSS'), (0, 'LSR0', 'N271')]
 
     def is_iol27(self, x: int, y: int) -> bool:
         return (y, x) == chipdb._gw5_60b_iol27_cell
@@ -6802,9 +6823,23 @@ class GW5AT_60B(GW5A):
             if typ not in self._iol27_reg_types:
                 raise Exception(f"IOL27{pin} takes a {', '.join(sorted(self._iol27_reg_types))} as its output register, not {typ}")
             self._iol27_regs = getattr(self, '_iol27_regs', set()) | {pin}
-            if 'RESET' in bel.cell.connections:
-                return []
-            return self.iol27_ties(bel.x, bel.y, pin, self._iol27_lsr_ties, 'LSR0', 'reset')
+            # the register's modes, as Gowin sets them (IDE builds, 2026-10-29):
+            # the input register's reset unused, and the output's reset and
+            # enable taken from LSR0 and CE0 when the design routes them. The
+            # reset is LSR0 high: Gowin's LSRMUX_LSR=INV is for a reset it
+            # routes inverted (runs 20-22).
+            attrs = [('OUTMODE', 'OREG'), ('SRMODE', 'LSR_OVER_CE'), ('CLKOMUX', 'ENABLE'),
+                     ('LSRIMUX_0', '0')]
+            nets = bel.cell.connections
+            if 'RESET' not in nets or self.pnr.is_gnd_net(nets['RESET'][0]):
+                attrs.append(('LSROMUX_0', '0'))
+            if 'CE' not in nets or self.pnr.is_vcc_net(nets['CE'][0]):
+                attrs.append(('CEOMUX_1', '1'))
+            av = set()
+            for attr, val in attrs:
+                self.chipdb.get_iologic_attr_val(AttrVal(attr, val), av)
+            self.iol27_slot_fuses(pin, av, f'IOLOGIC{pin}', get_shortval_fuses)
+            return []
         return super().get_IOLOGICO_EMPTY_fuses(bel)
 
     def get_IOLOGICI_EMPTY_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
@@ -6840,12 +6875,12 @@ class GW5AT_60B(GW5A):
 
     def process_OBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
-            return self.iol27_oe_fuses(bel)
+            return super().process_OBUF(bank_desc, bel) + self.iol27_oe_fuses(bel)
         return super().process_OBUF(bank_desc, bel)
 
     def process_TBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
         if self.is_iol27(bel.x, bel.y):
-            return self.iol27_oe_fuses(bel)
+            return super().process_TBUF(bank_desc, bel) + self.iol27_oe_fuses(bel)
         return super().process_TBUF(bank_desc, bel)
 
     def get_device_io_attrs(self) -> list[AttrVal]:

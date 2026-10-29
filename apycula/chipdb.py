@@ -1112,7 +1112,10 @@ def fse_fill_logic_tables(dev, fse, device):
             attr, val, _ = av
             table[(attr, val)] = code
     # shortval
-    ttypes = chain({t for row in fse['header']['grid'][61] for t in row}, range(1024, 1027))
+    # 1024-1026: the PLL, unknown_86 and ADC slots. The GW5AT-60B's
+    # 1028-1030 are its IO slots (chipdb._gw5_60b_io_slots).
+    slot_ttyps = range(1024, 1031) if device == 'GW5AT-60B' else range(1024, 1027)
+    ttypes = chain({t for row in fse['header']['grid'][61] for t in row}, slot_ttyps)
     for ttyp in ttypes:
         if ttyp not in fse:
             continue
@@ -1125,11 +1128,16 @@ def fse_fill_logic_tables(dev, fse, device):
                     table = ttyp_rec.setdefault(f"unknown_{lftable}", {})
                 for f, *fuses in fse[ttyp]['longfuse'][lftable]:
                     table[(f, )] = {fuse.fuse_lookup(fse, ttyp, f, device) for f in unpad(fuses)}
+        # a slot's fuses are numbered in the drpfuse table, a cell's in its own
+        if ttyp < 1024:
+            lookup = lambda f: fuse.fuse_lookup(fse, ttyp, f, device)
+        else:
+            lookup = lambda f: fuse.drpfuse_lookup(fse, ttyp - 1024, f, device)
         if 'const' in fse[ttyp]:
             ttyp_rec = dev.const.setdefault(ttyp, [])
             for fuse_list in fse[ttyp]['const'][4]:
                 for f in fuse_list:
-                    ttyp_rec.append(fuse.fuse_lookup(fse, ttyp, f, device))
+                    ttyp_rec.append(lookup(f))
         if 'shortval' in fse[ttyp]:
             ttyp_rec = dev.shortval.setdefault(ttyp, {})
             for stable in fse[ttyp]['shortval']:
@@ -1138,10 +1146,7 @@ def fse_fill_logic_tables(dev, fse, device):
                 else:
                     table = ttyp_rec.setdefault(f"unknown_{stable}", {})
                 for f_a, f_b, *fuses in fse[ttyp]['shortval'][stable]:
-                    if ttyp < 1024:
-                        table[(f_a, f_b)] = {fuse.fuse_lookup(fse, ttyp, f, device) for f in unpad(fuses)}
-                    else:
-                        table[(f_a, f_b)] = {fuse.drpfuse_lookup(fse, ttyp - 1024, f, device) for f in unpad(fuses)}
+                    table[(f_a, f_b)] = {lookup(f) for f in unpad(fuses)}
         if 'longval' in fse[ttyp]:
             ttyp_rec = dev.longval.setdefault(ttyp, {})
             for ltable in fse[ttyp]['longval']:
@@ -1150,7 +1155,7 @@ def fse_fill_logic_tables(dev, fse, device):
                 else:
                     table = ttyp_rec.setdefault(f"unknown_{ltable}", {})
                 for f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, *fuses in fse[ttyp]['longval'][ltable]:
-                    table[(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15)] = {fuse.fuse_lookup(fse, ttyp, f, device) for f in unpad(fuses)}
+                    table[(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15)] = {lookup(f) for f in unpad(fuses)}
 
 def gw5_hclk_idx(dev, device, row, col):
     if device == 'GW5A-25A':
@@ -5278,15 +5283,14 @@ _gw5_60b_io = {
 # like the rest of the left edge between rows 17 and 27, and the fse gives
 # it no IOB at all. Its pads are driven from row 28: A's from X6Y28, B's
 # from X7Y28 (ttyp 408, whose IOB and IOLOGIC tables are empty). Gowin IDE
-# builds (2026-10-28) and the Tang Console 60K show:
-# - each pad is driven only through a register in its cell: data on D1
-#   (A) or C2 (B), clock CLK0, enable CE0, reset LSR0. The register has
-#   no mode fuses, only routing. Unrouted, LSR0 sits at VCC and holds it
-#   in reset: a pin driven straight from a LUT never moved (runs 10-14),
-#   the IDE's build with the register clocked and LSR0 low passed all of
-#   the DDR3 (run 15). So the pin takes an output register (IOBFF) and
-#   nothing else, and gowin_pack ties LSR0 low when the design has no
-#   reset;
+# builds (2026-10-28 and 29) and the Tang Console 60K show:
+# - each pad is driven only through its output register: data on D1 (A)
+#   or C2 (B), clock CLK0, enable CE0, reset LSR0 of that cell. The
+#   register's modes (OREG, its clock, enable and reset muxes) and the
+#   pad's IOB settings are in a footer slot (_gw5_60b_iol27_slots), not in
+#   the grid. Without that slot the pin never moved (runs 10-19); the
+#   IDE's build, which writes it, passed all of the DDR3 (run 15). So the
+#   pin takes an output register (IOBFF) and nothing else;
 # - each pin's OE is C1 of its cell, held at VSS for an output (gowin_pack
 #   ties it when nothing routes it).
 # No input has been found, so these are output only: O goes nowhere.
@@ -5296,6 +5300,23 @@ _gw5_60b_iol27 = {
 }
 _gw5_60b_iol27_cell = (26, 0)
 _gw5_60b_iol27_ttyp = 1440
+# IOL21-27 have no IOB cells in the grid: their IOB and IOLOGIC fuses are in
+# footer slots, one per pin, whose cell types are the fse's 1028-1030 (each
+# 24 fuses by 8, with the IOBA/IOBB longval and IOLOGICA/B shortval tables).
+# Gowin writes D1 (IOL27B) into slot 14 and E1 (IOL27A) into slot 13; A1
+# (IOL23B) uses slot 10, B1 (IOL23A) 9, F4 (IOL21B) 8 (IDE builds,
+# 2026-10-29). A slot is 32 bytes, one per column; the last 8 are all ones.
+_gw5_60b_iol27_slots = {'A': (13, 1028), 'B': (14, 1029)}
+_gw5_60b_io_slot_size = (8, 32)
+_gw5_60b_io_slot_fuses = 24
+# An unused pin's slot, as Gowin writes slots 8-14 (IDE builds, 2026-10-29):
+# its A or B table's settings for an unused LVCMOS pin in bank 11.
+_gw5_60b_io_slot_unused_a = {(0, 19), (1, 21), (4, 20), (5, 18), (5, 20)}
+_gw5_60b_io_slot_unused_b = {(1, 2), (1, 12), (2, 2), (3, 2), (4, 12)}
+_gw5_60b_io_slot_unused = {8: _gw5_60b_io_slot_unused_a, 9: _gw5_60b_io_slot_unused_a,
+                           10: _gw5_60b_io_slot_unused_b, 11: _gw5_60b_io_slot_unused_a,
+                           12: _gw5_60b_io_slot_unused_b, 13: _gw5_60b_io_slot_unused_a,
+                           14: _gw5_60b_io_slot_unused_b}
 
 def add_60b_iol27_bels(dev):
     """ A cell type of its own for IOL27, so its bels land in that one cell
