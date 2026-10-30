@@ -662,6 +662,13 @@ for _n, _name in hclknames_5a25a.items():
     if _n < 4 * 187 and not _name.startswith('HCLK_UNK'):
         hclknames_60b[_n % 187 + _n // 187 * 198] = _name
 
+# The fifth HCLK (the bottom left, index 4) takes the first's names with
+# its own index.
+for _n in range(198):
+    _name = hclknames_60b[_n]
+    if _name[-2:-1] == '0' and _name.startswith(('HCLK', 'CLKDIV', 'L2HCLK')) and not _name.startswith('HCLK_UNK'):
+        hclknames_60b[_n + 4 * 198] = f'{_name[:-2]}4{_name[-1]}'
+
 hclknumbers_60b = {v: k for k, v in hclknames_60b.items()}
 
 """ *********************************************************************************

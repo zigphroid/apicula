@@ -1176,17 +1176,23 @@ def gw5_hclk_idx(dev, device, row, col):
         # the bottom right (banks 6-8, (73, 109)), the bottom left (bank 9,
         # (73, 36)) and the left (banks 10 and 11, (46, 0)). nextpnr knows
         # HCLK wires by the names HCLK00-HCLK33, so four at most: the top
-        # is 0, the bottom right 1 and the right 3, as the 25A's right side.
-        # The bottom left and the left aren't modelled yet. Bank 1 starts
-        # at IOT74 and bank 8 at IOB75 (the pin table; IOx<n> is column
-        # n - 1), so both HCLKs end there; IOLOGICs left of that on those
-        # edges get no FCLK.
+        # is 0, the bottom right 1 and the right 3, as the 25A's right side;
+        # the left is 2, as the 25A's left, and the bottom left 4, a fifth
+        # index nextpnr knows by HCLK40-HCLK43. Bank 1 starts at IOT74 and
+        # bank 8 at IOB75 (the pin table; IOx<n> is column n - 1), so the
+        # top and bottom right HCLKs end there; the bottom left (bank 9)
+        # takes the bottom edge's IOLOGICs left of it. The top edge's left
+        # of IOT74 get no FCLK yet.
         if col == dev.cols - 1 and 0 < row < dev.rows - 1:
             return 3
+        if col == 0 and 0 < row < dev.rows - 1:
+            return 2
         if row == 0 and 73 <= col < dev.cols - 1:
             return 0
         if row == dev.rows - 1 and 74 <= col < dev.cols - 1:
             return 1
+        if row == dev.rows - 1 and 0 < col < 74:
+            return 4
     return -1
 
 # Table 48 describes the HCLK wire connections, but the problem is that it also
@@ -1228,7 +1234,7 @@ def gw5_logic_to_hclk_wires(device):
     if device == 'GW5AT-60B':
         # The big table 48 cells (gw5_hclk_idx); cam2dvi brings its pixel
         # clock into the right one on its CLK1 (L2HCLK31).
-        return {0: (0, 109), 1: (73, 109), 3: (37, 146)}
+        return {0: (0, 109), 1: (73, 109), 2: (46, 0), 3: (37, 146), 4: (73, 36)}
     return {}
 
 def make_hclk_pip(dev, hclk_idx, row, col, src, dest, fuses = set()):
@@ -1256,7 +1262,7 @@ def gw5_make_hclk_pips(dev, device, fse, dat: Datfile):
             ttyp = dev.grid[row][col]
             hclk_idx = gw5_hclk_idx(dev, device, row, col)
             if hclk_idx >= 0:
-                if 48 in fse[ttyp]['wire']:
+                if 48 in fse[ttyp].get('wire', {}):
                     for srcid, destid, *fuses in fse[ttyp]['wire'][48]:
                         fuses = {fuse.fuse_lookup(fse, ttyp, f, device) for f in unpad(fuses)}
                         # HCLK wires
