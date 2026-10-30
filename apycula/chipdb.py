@@ -5080,6 +5080,10 @@ _iologic_inputs =  [(0, 'D'), (1, 'D0'), (2, 'D1'), (3, 'D2'), (4, 'D3'), (5, 'D
                     (36, 'RADDR1'), (37, 'RADDR2'), (38, 'CALIB'), (39, 'DI'), (40, 'SETN'),
                     (41, 'SDTAP'), (42, 'VALUE'), (42, 'CE'), (43, 'DASEL'), (44, 'DASEL0'), (45, 'DASEL1'),
                     (46, 'DAADJ'), (47, 'DAADJ0'), (48, 'DAADJ1')]
+# GW5A: the IODELAY's DLYSTEP[7:0] (the dynamic delay), entries 54-61 of
+# the dat's Iologic{A,B}In, the only ones past DAADJ1 that name wires.
+# Which entry is which bit is from the IDE reference builds of DDR3 stage C.
+_iologic_gw5_inputs = [(54 + i, f'DLYSTEP{i}') for i in range(8)]
 _iologic_outputs = [(0, 'Q'),  (1, 'Q0'), (2, 'Q1'), (3, 'Q2'), (4, 'Q3'), (5, 'Q4'),
                     (6, 'Q5'), (7, 'Q6'), (8, 'Q7'), (9, 'Q8'), (10, 'Q9'), (11, 'Q10'),
                     (12, 'Q11'), (13, 'Q12'), (14, 'Q13'), (15, 'Q14'), (16, 'Q15'),
@@ -5485,7 +5489,7 @@ def dat_portmap(dat, dev, device):
                         # is the main one.
                         if 'IOBB' in tile.bels:
                             r_off, c_off = tile.bels['IOBB'].fuse_cell_offset
-                            for idx, nam in _iologic_inputs:
+                            for idx, nam in _iologic_inputs + _iologic_gw5_inputs:
                                 w_idx = dat.compat_dict[f'Iologic{buf}In'][idx]
                                 if w_idx >= 0:
                                     wire = wnames.wirenames[w_idx]
