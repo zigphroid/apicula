@@ -155,7 +155,10 @@ def read_bitstream(fname):
                         compress_padding = 43
                         is5ASeries = True
                     elif ba == b'\x06\x00\x00\x00\x00\x01\x48\x1b':   # GW5AT-60B
-                        padding = 3
+                        # 918 rows: the third bit before each frame is the
+                        # bottom row's row 33 (the IODELAYs' delays, DDR3
+                        # stage C), so only two are padding.
+                        padding = 2
                         compress_padding = 43
                         frame_bits = 917
                         is5ASeries = True

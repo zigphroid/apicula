@@ -6969,6 +6969,29 @@ class GW5AT_60B(GW5A):
         bits = self.chipdb.get_iologic_fuses(x, y, av, iol_bel.idx_str)
         return [CellFuseBits(x, y, bits)] if bits else []
 
+    def handle_iodelay(self, bel: IologicBelDesc) -> list[AttrVal]:
+        # The GW1N's DELAY_DEL bits name other features here; the 60B's delay
+        # is set in set_iologic_attrvals.
+        return [a for a in super().handle_iodelay(bel) if not a.attr.startswith('DELAY_DEL')]
+
+    def set_iologic_attrvals(self, bel: IologicBelDesc, attr_vals: list[AttrVal]) -> set[int]:
+        # The IODELAY of a 60B IOLOGIC (DDR3 stage C, Gowin IDE reference
+        # builds refdly): C_STATIC_DLY v (1-255) is the table's feature 123 + v,
+        # which sets v's eight bits one per column of row 33; DYN_DLY_EN TRUE
+        # (DLYSTEP drives the delay) is features 62, 63 with 651, and 108,
+        # the IDE's four bits (87 or 88 in 651's place would add ADAPT_EN's
+        # row-32 bits). ADAPT_EN is not done.
+        av = super().set_iologic_attrvals(bel, attr_vals)
+        if bel.cell.attrs.get('IODELAY') not in ('IN', 'OUT'):
+            return av
+        parms = bel.cell.parms
+        dly = int(parms.get('C_STATIC_DLY', '0'), 2) & 0xff
+        if dly:
+            av.add(123 + dly)
+        if str(parms.get('DYN_DLY_EN', 'FALSE')).strip('"') == 'TRUE':
+            av |= {62, 63, 651, 108}
+        return av
+
     def iologic_fuse_cell(self, bel: IologicBelDesc) -> tuple[int, int]:
         # The B half of a 60B IO pair keeps its IOLOGIC fuses in the cell of
         # its IOBB (fuse_cell_offset: the next column on the top and bottom
