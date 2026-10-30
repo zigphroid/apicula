@@ -6972,7 +6972,11 @@ class GW5AT_60B(GW5A):
     def handle_iodelay(self, bel: IologicBelDesc) -> list[AttrVal]:
         # The GW1N's DELAY_DEL bits name other features here; the 60B's delay
         # is set in set_iologic_attrvals.
-        return [a for a in super().handle_iodelay(bel) if not a.attr.startswith('DELAY_DEL')]
+        # CLKOMUX is not set by the IDE for an input delay.
+        attrs = [a for a in super().handle_iodelay(bel) if not a.attr.startswith('DELAY_DEL')]
+        if bel.cell.attrs.get('IODELAY') == 'IN':
+            attrs = [a for a in attrs if a.attr != 'CLKOMUX']
+        return attrs
 
     def set_iologic_attrvals(self, bel: IologicBelDesc, attr_vals: list[AttrVal]) -> set[int]:
         # The IODELAY of a 60B IOLOGIC (DDR3 stage C, Gowin IDE reference
@@ -6985,6 +6989,10 @@ class GW5AT_60B(GW5A):
         if bel.cell.attrs.get('IODELAY') not in ('IN', 'OUT'):
             return av
         parms = bel.cell.parms
+        if bel.cell.attrs.get('IODELAY') == 'IN':
+            # The rest of the IDE's input delay, static or not: (32,82) with
+            # (33,58), (32,1), and (32,0) with (33,21).
+            av |= {90, 637, 643}
         dly = int(parms.get('C_STATIC_DLY', '0'), 2) & 0xff
         if dly:
             av.add(123 + dly)
