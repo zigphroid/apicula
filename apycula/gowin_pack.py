@@ -421,7 +421,7 @@ class Netlist:
         # Therefore, we will postpone their generation until after normal IOs, once the standard has been clarified.
         yield_later = []
 
-        belre = re.compile(r"X(\d+)Y(\d+)/(?:GSR|LUT|DFF|IOB|MUX|ALU|ODDR|OSC[ZFHWOA]?|BUF[GS]|RAM16SDP4|RAM16SDP2|RAM16SDP1|PLL|IOLOGIC|CLKDIV2|CLKDIV|BSRAM|ALU|MULTALU18X18|MULTALU27X18|MULTALU36X18|MULTADDALU18X18|MULTADDALU12X12|MULT36X36|MULT18X18|MULT12X12|MULT9X9|PADD18|PADD9|BANDGAP|DQCE|DCS|USERFLASH|EMCU|DHCEN|MIPI_OBUF|MIPI_IBUF|DLLDLY|PINCFG|PLLA|ADC|GW_JTAG)(\w*)")
+        belre = re.compile(r"X(\d+)Y(\d+)/(?:GSR|LUT|DFF|IOB|MUX|ALU|ODDR|OSC[ZFHWOA]?|BUF[GS]|RAM16SDP4|RAM16SDP2|RAM16SDP1|PLL|IOLOGIC|CLKDIV2|CLKDIV|BSRAM|ALU|MULTALU18X18|MULTALU27X18|MULTALU36X18|MULTADDALU18X18|MULTADDALU12X12|MULT36X36|MULT18X18|MULT12X12|MULT9X9|PADD18|PADD9|BANDGAP|DQCE|DCS|USERFLASH|EMCU|DHCEN|MIPI_OBUF|MIPI_IBUF|DLLDLY|PINCFG|PLLA|ADC|GW_JTAG|DQS|DDRDLL)(\w*)")
         for cell_name, cell_data in self.in_file['modules'][self.top_module_name]['cells'].items():
             cell = self.fill_cell_desc(cell_name, cell_data)
             bel_attr = cell.attrs.get('NEXTPNR_BEL')
@@ -6999,6 +6999,97 @@ class GW5AT_60B(GW5A):
         if str(parms.get('DYN_DLY_EN', 'FALSE')).strip('"') == 'TRUE':
             av |= {62, 63, 651, 108}
         return av
+
+    def check_elvds_placement(self, bel: IoBelDesc):
+        # SSTL15D and the other pseudo-differential types the IDE puts on a
+        # true LVDS pair with ELVDS_IOBUF (DDR3's DQS, refdqs builds).
+        io_type = str(bel.cell.attrs.get('IO_TYPE', '')).strip('"')
+        if io_type.startswith(('SSTL', 'HSTL')) and io_type.rstrip('_I').endswith('D'):
+            io_diff_cfg = self.chipdb.get_io_diff_cfg(bel.x, bel.y, bel.idx_str)
+            if io_diff_cfg and io_diff_cfg.positive == (bel.cell.parms.get('DIFF') == 'P'):
+                return
+        super().check_elvds_placement(bel)
+
+    def get_in_iologic_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
+        # IDES4_MEM, IDES8_MEM (INMODE MIDDRX2, MIDDRX4): ICLK and the FIFO
+        # pointers come from the DQS block; the FIFO is on unless the DQS
+        # bypasses it (FIFO_MODE_SEL 1). As the IDE's refdqs builds.
+        attr_vals = super().get_in_iologic_attrs(bel)
+        if bel.cell.parms.get('INMODE') in {'MIDDRX2', 'MIDDRX4'} and 'DQS_FIFO_BYPASS' not in bel.cell.attrs:
+            attr_vals.append(AttrVal('FIFO', 'ENABLE'))
+        return attr_vals
+
+    # DDR3's strobe pair: SSTL15D on an ELVDS_IOBUF, as the IDE's refdqs
+    # builds set it, by feature: the differential receiver (5, HSTL15D_I's
+    # bits; with DRIVE 8 and 186 it also sets what SSTL15_I's 91 would),
+    # PULLMODE NONE,
+    # PADDI, the tristate mux (135, 136, 147), IOB_GW5_ADC_DYN_IN (191), and
+    # on the A side the 100-ohm termination (113, 158). The common code has
+    # no SSTL15D for this chip.
+    _sstl15d_features = {5, 100, 104, 109, 135, 136, 138, 147, 186, 191}
+
+    def process_ELVDS_IOBUF(self, bank_desc: BankDesc, bel: IoBelDesc) -> list[CellFuseBits]:
+        io_type = str(bel.cell.attrs.get('IO_TYPE', '')).strip('"')
+        # (the IO normalisation calls every SSTL*D SSTL_D)
+        if io_type not in ('SSTL15D', 'SSTL15D_I', 'SSTL_D'):
+            return super().process_ELVDS_IOBUF(bank_desc, bel)
+        self.check_elvds_placement(bel)
+        av = set(self._sstl15d_features)
+        if bel.idx_str == 'A':
+            av |= {113, 158}
+        if str(bel.cell.attrs.get('SLEW_RATE', '')).strip('"') == 'FAST':
+            av.add(97)
+        return self.get_iob_fuses(bel.x, bel.y, bel.idx_str, av)
+
+    # The DQS block (DDR3 stage D, Gowin IDE reference builds refdqs): its
+    # cell's longfuse table 58, by feature. Every DQS the IDE builds has
+    # _dqs_base; DQS_MODE adds its own (X1 none), RD_PNTR bit k is feature
+    # 13 + k, HWL 27, FIFO_MODE_SEL 1 is 10 and 19, and RESET left
+    # unconnected is 23 (the IDE's RESET tied 1). The features' own names
+    # are not known.
+    _dqs_base = {11, 12, 17, 18, 21, 22, 26, 34, 37, 57, 59, 60, 61}
+    _dqs_mode = {'X1': set(), 'X2_DDR2': {28}, 'X2_DDR3': {29}, 'X2_DDR3_EXT': {30}, 'X4': {33}}
+
+    def get_DQS_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        parms = bel.cell.parms
+        mode = str(parms.get('DQS_MODE', 'X1')).strip('"')
+        if mode not in self._dqs_mode:
+            raise Exception(f"DQS {bel.cell.name}: DQS_MODE {mode} is not known")
+        av = self._dqs_base | self._dqs_mode[mode]
+        rd_pntr = int(str(parms.get('RD_PNTR', '0')), 2) & 7
+        av |= {13 + k for k in range(3) if rd_pntr & (1 << k)}
+        if str(parms.get('HWL', 'false')).strip('"').lower() == 'true':
+            av.add(27)
+        if int(str(parms.get('FIFO_MODE_SEL', '0')), 2) & 1:
+            av |= {10, 19}
+        if 'DQS_RESET_TIED' in bel.cell.attrs:
+            av.add(23)
+        ttyp = self.chipdb.get_ttyp(bel.x, bel.y)
+        bits = get_long_fuses(self.chipdb.db, ttyp, av, 'unknown_58')
+        return [CellFuseBits(bel.x, bel.y, bits)]
+
+    # The DDR DLL (site DDRDLLM_BL): its fuses are (73, 0)'s DLL0 table, its
+    # pins in (64, 3). The IDE sets features 5, 13, 17, 18, 45 by default;
+    # DLL_FORCE TRUE adds 15, DIV_SEL 1 adds 14, SCAL_EN FALSE drops 13,
+    # CODESCAL n (1-7) is feature 5 + n, and RESET tied 0 adds 19.
+    def get_DDRDLL_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        parms = bel.cell.parms
+        av = {5, 13, 17, 18, 45}
+        if str(parms.get('DLL_FORCE', 'FALSE')).strip('"').upper() == 'TRUE':
+            av.add(15)
+        if int(str(parms.get('DIV_SEL', '0')), 2) & 1:
+            av.add(14)
+        if str(parms.get('SCAL_EN', 'TRUE')).strip('"').upper() == 'FALSE':
+            av.discard(13)
+        code = int(str(parms.get('CODESCAL', '000')).strip('"'), 2) & 7
+        if code:
+            av.add(5 + code)
+        if 'DDRDLL_RESET_TIED' in bel.cell.attrs:
+            av.add(19)
+        y, x = self.chipdb.db.extra_func[(bel.y, bel.x)]['ddrdll']['fuse_loc']
+        ttyp = self.chipdb.get_ttyp(x, y)
+        bits = get_shortval_fuses(self.chipdb.db, ttyp, av, 'DLL0')
+        return [CellFuseBits(x, y, bits)]
 
     def iologic_fuse_cell(self, bel: IologicBelDesc) -> tuple[int, int]:
         # The B half of a 60B IO pair keeps its IOLOGIC fuses in the cell of

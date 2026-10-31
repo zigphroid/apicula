@@ -2463,6 +2463,44 @@ def fse_create_dlldly(dev, device):
             dlldly_bels = extra.setdefault(f'dlldly_fusebels', set())
             dlldly_bels.update(fuse_bels)
 
+# GW5AT-60B DQS blocks and the DDR DLL, from Gowin IDE reference builds
+# (pectinos pb/scratch/ddr3a/refdqs). A DQS block sits two cells right of
+# its strobe pin's cell (IOB26 -> X27, IOB62 -> X63); its config is the
+# cell's longfuse table 58. DQSIN, FCLK, DLLSTEP and the outputs to the
+# IOLOGICs (DQSR90, DQSW0, DQSW270, RPOINT, WPOINT) are dedicated: nextpnr
+# drops those nets, so they have no wires here. The DDR DLL (site
+# DDRDLLM_BL) keeps its config in (73, 0)'s DLL0 table and its fabric pins in
+# (64, 3), but LOCK, which comes out on (64, 2)'s OF2.
+_gw5a_60b_dqs_cols = (10, 27, 45, 63, 83, 100, 118)
+_gw5a_dqs_in = {
+    'READ0': 'A3', 'READ1': 'A4', 'READ2': 'A5', 'READ3': 'A7',
+    'RCLKSEL0': 'C0', 'RCLKSEL1': 'C1', 'RCLKSEL2': 'C2',
+    'WSTEP0': 'D3', 'WSTEP1': 'D4', 'WSTEP2': 'D5', 'WSTEP3': 'D7',
+    'WSTEP4': 'CLK2', 'WSTEP5': 'LSR2', 'WSTEP6': 'CE1', 'WSTEP7': 'CE2',
+    'RDIR': 'A0', 'RLOADN': 'A1', 'RMOVE': 'A2',
+    'WDIR': 'B0', 'WLOADN': 'B1', 'WMOVE': 'B2', 'HOLD': 'B3',
+    'PCLK': 'CLK0', 'RESET': 'LSR0',
+    # unnamed inputs the IDE ties 0
+    'UNK0': 'B7', 'UNK1': 'C7', 'UNK2': 'D0', 'UNK3': 'D1',
+}
+_gw5a_dqs_out = {'RVALID': 'Q5', 'RFLAG': 'Q6', 'WFLAG': 'Q7', 'RBURST': 'F6'}
+
+def fse_create_gw5a_dqs(dev, device):
+    if device != 'GW5AT-60B':
+        return
+    row = dev.rows - 1
+    for col in _gw5a_60b_dqs_cols:
+        extra = dev.extra_func.setdefault((row, col), {})
+        extra['dqs'] = {'io_loc': f'X{col - 2}Y{row}', 'in_wires': dict(_gw5a_dqs_in),
+                        'out_wires': dict(_gw5a_dqs_out)}
+    # the DDR DLL
+    extra = dev.extra_func.setdefault((64, 3), {})
+    add_node(dev, 'X3Y64/DDRDLL_LOCK', '', 64, 3, 'DDRDLL_LOCK')
+    add_node(dev, 'X3Y64/DDRDLL_LOCK', '', 64, 2, 'OF2')
+    extra['ddrdll'] = {'fuse_loc': (row, 0),
+                       'in_wires': {'CLKIN': 'CLK0', 'RESET': 'LSR0', 'STOP': 'A1', 'UPDNCNTL': 'A0'},
+                       'out_wires': {'LOCK': 'DDRDLL_LOCK'}}
+
 _pll_loc = {
  'GW1N-1':
    {'TRPLL0CLK0': (0, 17, 'F4'), 'TRPLL0CLK1': (0, 17, 'F5'),
@@ -4842,6 +4880,7 @@ def from_fse(device, fse, dat: Datfile):
     fse_create_logic2clk(dev, device, dat)
     fse_create_dhcen(dev, device, fse, dat)
     fse_create_dlldly(dev, device)
+    fse_create_gw5a_dqs(dev, device)
     create_segments(dev, device)
     disable_plls(dev, device)
     sync_extra_func(dev)
