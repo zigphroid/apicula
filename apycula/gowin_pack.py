@@ -5698,6 +5698,14 @@ class GW5A(Device):
         for i in range(7):
             attr = f'A_CLKOUT{i}_PE_COARSE'
             val = int(cell_parms.get(attr, '0'), 2)
+            # A coarse phase is counted in VCO cycles within one output
+            # period, so it must be under that output's divider. The IDE
+            # refuses it (PA2144); built anyway, the output is dead (GW5AT-60B
+            # board, 2026-11-01: CLKOUT2 at ODIV 2 with PE_COARSE 6).
+            en = cell_parms.get(f'A_CLKOUT{i}_EN', 'TRUE' if i == 0 else 'FALSE')
+            div = int(cell_parms.get(f'A_ODIV{i}_SEL', bin(8)), 2)
+            if en == 'TRUE' and val >= div:
+                raise Exception(f"CLKOUT{i}_PE_COARSE ({val}) must be less than ODIV{i}_SEL ({div}).")
             self.chipdb.get_pll_attr_val(AttrVal(attr, val), av)
 
         for i in range(7):
