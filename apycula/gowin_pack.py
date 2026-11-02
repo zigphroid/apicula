@@ -5363,9 +5363,21 @@ class GW5A(Device):
     def get_extra_slots(self) -> dict[int, any]:
         return self.extra_slots
 
-    def create_pll_slot(self, idx: int):
+    def create_pll_slot(self, idx: int, wide: bool = False):
         """ Create bitmap for PLL """
-        bitmap = bitmatrix.zeros(8, 35)
+        if wide:
+            # GW5AT-60B's bottom-edge PLL: the IDE writes its record 43
+            # columns wide with columns 35-42 all set, and without them its
+            # CLKOUT2 and CLKOUT3 never run (board, 2026-11-02: the same
+            # build with the 35-wide record has both dead, with the 43-wide
+            # one all four outputs run and the DLL they feed locks). The
+            # right edge's PLLs run with 35 and are left as they were.
+            bitmap = bitmatrix.zeros(8, 43)
+            for row in range(8):
+                for col in range(35, 43):
+                    bitmap[row][col] = 1
+        else:
+            bitmap = bitmatrix.zeros(8, 35)
         self.extra_slots[idx] = bitmap
         return bitmap
 
@@ -5379,10 +5391,10 @@ class GW5A(Device):
         for row, col in bits:
             bitmap[row][col] = 1
 
-    def set_pll_slot_fuses(self, idx: int, av: set[int]):
+    def set_pll_slot_fuses(self, idx: int, av: set[int], wide: bool = False):
         bits = self.chipdb.get_pll_slot_fuses(av)
         if bits:
-            bitmap = self.create_pll_slot(idx)
+            bitmap = self.create_pll_slot(idx, wide)
             self.set_slot_bits(bitmap, bits)
         return
 
@@ -5774,7 +5786,8 @@ class GW5A(Device):
         av = self.get_pll_attrvals(bel)
 
         slot_idx = self.chipdb.get_slot_idx(bel.x, bel.y, 'pll')
-        self.set_pll_slot_fuses(slot_idx, av)
+        wide = self.device_name == 'GW5AT-60B' and bel.y == self.chipdb.rows - 1
+        self.set_pll_slot_fuses(slot_idx, av, wide)
         return []
 
     def get_default_clkdiv_divmode(self) -> str:

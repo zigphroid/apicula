@@ -2564,8 +2564,11 @@ _pll_loc = {
 # R74C64's UNK533+n, which drives the bus line UNK183+n, and the bus line
 # reaches the centre's PCLKnA multiplexers at R28C74 and the clock tiles at
 # R55-56C75 and R19C74. The fse has each of those pips but nothing says they
-# are one wire, so these nodes join them. Only CLKOUT0-3 to UNK533-536 is
-# seen in an IDE build; 4-6 follow the pattern and aren't confirmed.
+# are one wire, so these nodes join them. CLKOUT0-3 to UNK533-536 is
+# confirmed by four one-output IDE builds (bpC0-3) and on the board
+# (2026-11-02: all four run, 400 MHz on CLKOUT2, with the 43-wide slot
+# record gowin_pack writes for this PLL); 4-6 follow the pattern and aren't
+# confirmed.
 _60b_bottom_pll_relay = (73, 63)
 _60b_bottom_pll_relay_ins = {f'UNK{533 + n}': n for n in range(7)}
 _60b_bottom_pll_bus = {f'UNK{n}' for n in range(183, 191)}
