@@ -6750,6 +6750,12 @@ class GW5AT_60B(GW5A):
         'SPINE12': [('FCLKSEL0', 'HCLK2'), ('FCLKSEL1', 'HCLK2'), ('FCLKSEL2', 'HCLK2_'), ('FCLKSEL3', 'HCLK2')],
         'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL1', 'HCLK3'), ('FCLKSEL2', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
     }
+    _fclk_in_sel = {
+        'SPINE10': [('FCLKSEL0', 'HCLK0'), ('FCLKSEL5', 'HCLK0'), ('FCLKSEL6', 'HCLK0'), ('FCLKSEL7', 'HCLK0_'), ('FCLKSEL3', 'HCLK0')],
+        'SPINE11': [('FCLKSEL0', 'HCLK1'), ('FCLKSEL5', 'HCLK1'), ('FCLKSEL6', 'HCLK1'), ('FCLKSEL7', 'HCLK1_'), ('FCLKSEL4', 'HCLK1')],
+        'SPINE12': [('FCLKSEL0', 'HCLK2'), ('FCLKSEL5', 'HCLK2'), ('FCLKSEL6', 'HCLK2'), ('FCLKSEL7', 'HCLK2_'), ('FCLKSEL3', 'HCLK2')],
+        'SPINE13': [('FCLKSEL0', 'HCLK3'), ('FCLKSEL5', 'HCLK3'), ('FCLKSEL6', 'HCLK3'), ('FCLKSEL7', 'HCLK3_'), ('FCLKSEL4', 'HCLK3')],
+    }
 
     # Spines 6 and 7 reach the quadrants from the centre through the DCS,
     # whose input D is PCLK6D/PCLK7D (cell R19C74). The DCS's select inputs
@@ -7036,6 +7042,13 @@ class GW5AT_60B(GW5A):
         # pointers come from the DQS block; the FIFO is on unless the DQS
         # bypasses it (FIFO_MODE_SEL 1). As the IDE's refdqs builds.
         attr_vals = super().get_in_iologic_attrs(bel)
+        # The FCLK lane: the common code picks only between ECLK0 and ECLK1,
+        # which name no fuses here, so every IDES took HCLK lane 0 and one
+        # whose FCLK came on lane 1 (as the DQS block's must, at X27) read
+        # nothing. The IDE's input-only IOLOGIC on lane 1 (refdqs/ide1) sets
+        # FCLKSEL0 and FCLKSEL5-7 to HCLK1, as the 25A's input selects.
+        if bel.fclk in self._fclk_in_sel:
+            attr_vals += [AttrVal(a, v) for a, v in self._fclk_in_sel[bel.fclk]]
         if bel.cell.parms.get('INMODE') in {'MIDDRX2', 'MIDDRX4'} and 'DQS_FIFO_BYPASS' not in bel.cell.attrs:
             attr_vals.append(AttrVal('FIFO', 'ENABLE'))
         return attr_vals
