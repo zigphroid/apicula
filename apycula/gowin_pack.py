@@ -6981,6 +6981,10 @@ class GW5AT_60B(GW5A):
         # so without these they never reach the pin.
         iol_bel = self.make_IologicBelDesc(bel)
         iol_bel = self.set_iologic_bel_fclk(iol_bel)
+        # A differential OSER8_MEM (DDR3's DQS): the IDE's 'wr' build sets
+        # nothing in the B half's IOLOGIC, only the B pin's TRI_MUX.
+        if iol_bel.main_cell_outmode == 'MODDRX4':
+            return []
         attr_vals = self.common_iologic_handler(iol_bel)
         if iol_bel.main_cell_outmode:
             attr_vals += self.get_out_iologic_attrs(iol_bel)
@@ -7071,6 +7075,10 @@ class GW5AT_60B(GW5A):
         av = set(self._sstl15d_features)
         if bel.idx_str == 'A':
             av |= {113, 158}
+        # driven too, its tristate from the serializer: TRI_MUX TMDDR on
+        # both halves (the IDE's 'wr' build)
+        if 'IOLOGIC_TX' in bel.cell.parms:
+            self.chipdb.get_iob_attr_val(AttrVal('TRI_MUX', 'TMDDR'), av)
         if str(bel.cell.attrs.get('SLEW_RATE', '')).strip('"') == 'FAST':
             av.add(97)
         return self.get_iob_fuses(bel.x, bel.y, bel.idx_str, av)
@@ -7140,11 +7148,39 @@ class GW5AT_60B(GW5A):
         return x, y
 
     def get_out_iologic_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
+        if bel.cell.parms.get('OUTMODE') == 'MODDRX4':
+            return self.get_moddrx4_attrs(bel)
         attr_vals = super().get_out_iologic_attrs(bel)
         if bel.fclk in self._fclk_out_sel:
             attr_vals.append(AttrVal('WRFCLKSEL', 'UNK102'))
             attr_vals += [AttrVal(a, v) for a, v in self._fclk_out_sel[bel.fclk]]
         return attr_vals
+
+    # An OSER8_MEM (OUTMODE MODDRX4): DDR3's DQ and DQS out, the TCLK
+    # stage clocked by the DQS block's DQSW0 or DQSW270 (nextpnr's pack_dqs
+    # names which in DQS_WCLK). As the IDE's 'wr' build against 'q0'
+    # (pb/scratch/ddr3a/refdqs/README.md): the ODDRX4 bits, CLKOMUX,
+    # WRFCLKSEL DQSW or DQSW270 instead of the plain serializer's UNK102,
+    # the FCLK lane, and the output reset mux left on the LSR (no
+    # LSROMUX_0 0).
+    def get_moddrx4_attrs(self, bel: IologicBelDesc) -> list[AttrVal]:
+        wclk = str(bel.cell.attrs.get('DQS_WCLK', '')).strip('"')
+        if wclk not in ('DQSW', 'DQSW270'):
+            raise Exception(f"{bel.cell.name}: MODDRX4 with no DQS write clock (DQS_WCLK {wclk!r})")
+        attr_vals = [AttrVal('LSRIMUX_0', '0'), AttrVal('OUTMODE', 'MODDRX4'), AttrVal('CLKOMUX', 'ENABLE'),
+                     AttrVal('OCLKCE', 'CE'), AttrVal('WRFCLKSEL', wclk)]
+        if bel.fclk in self._fclk_out_sel:
+            attr_vals += [AttrVal(a, v) for a, v in self._fclk_out_sel[bel.fclk]]
+        return attr_vals
+
+    # A pin whose tristate comes from its serializer's TX (nextpnr marks
+    # the IOB IOLOGIC_TX): TRI_MUX TMDDR, as the IDE's 'wr' build, in place
+    # of the ODMUX_1 1 an unconnected OEN gets.
+    def set_iobuf_attrs(self, bel: IoBelDesc, av: set[int]):
+        if 'IOLOGIC_TX' in bel.cell.parms:
+            self.chipdb.get_iob_attr_val(AttrVal('TRI_MUX', 'TMDDR'), av)
+            return
+        super().set_iobuf_attrs(bel, av)
 
     def __init__(self, cli_args: CliArgs, pnr: Netlist):
         super().__init__(cli_args, pnr)
