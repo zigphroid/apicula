@@ -2558,6 +2558,19 @@ _pll_loc = {
     'BRPLL0CLK2': (45, 53, 'F5'), 'BRPLL0CLK3': (45, 53, 'F6'), },
 }
 
+# GW5AT-60B: the bottom-edge PLL (PLL_B[1], X72Y73, slot 18) sends its
+# outputs to the clock tree over dedicated wires, not the fabric: the IDE's
+# build of a probe with that PLL (ideb3, 2026-11-01) takes CLKOUTn into
+# R74C64's UNK533+n, which drives the bus line UNK183+n, and the bus line
+# reaches the centre's PCLKnA multiplexers at R28C74 and the clock tiles at
+# R55-56C75 and R19C74. The fse has each of those pips but nothing says they
+# are one wire, so these nodes join them. Only CLKOUT0-3 to UNK533-536 is
+# seen in an IDE build; 4-6 follow the pattern and aren't confirmed.
+_60b_bottom_pll_relay = (73, 63)
+_60b_bottom_pll_relay_ins = {f'UNK{533 + n}': n for n in range(7)}
+_60b_bottom_pll_bus = {f'UNK{n}' for n in range(183, 191)}
+_60b_bottom_pll_bus_cells = {(73, 63), (73, 0), (54, 74), (55, 74), (27, 73), (18, 73)}
+
 def fse_create_pll_clock_aliases(db, device):
     # we know exactly where the PLL is and therefore know which aliases to create
     for row in range(db.rows):
@@ -2572,6 +2585,14 @@ def fse_create_pll_clock_aliases(db, device):
                         if w_src.startswith('MPLL'):
                             db.nodes.setdefault(w_src, ("PLL_O", set()))[1].add((row, col, w_src))
                             db.nodes.setdefault(w_dst, ("PLL_O", set()))[1].add((row, col, w_dst))
+                    elif device in {'GW5AT-60B'}:
+                        if (row, col) in _60b_bottom_pll_bus_cells:
+                            for w in (w_src, w_dst):
+                                if w in _60b_bottom_pll_bus:
+                                    db.nodes.setdefault(f'BPLLBUS{w[3:]}', ("PLL_O", set()))[1].add((row, col, w))
+                        if (row, col) == _60b_bottom_pll_relay and w_src in _60b_bottom_pll_relay_ins:
+                            n = _60b_bottom_pll_relay_ins[w_src]
+                            db.nodes.setdefault(f'MPLL18CLKOUT{n}', ("PLL_O", set()))[1].add((row, col, w_src))
 
             # Himbaechel HCLK
             if (row, col) in db.hclk_pips:
