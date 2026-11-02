@@ -2569,10 +2569,19 @@ _pll_loc = {
 # (2026-11-02: all four run, 400 MHz on CLKOUT2, with the 43-wide slot
 # record gowin_pack writes for this PLL); 4-6 follow the pattern and aren't
 # confirmed.
-_60b_bottom_pll_relay = (73, 63)
-_60b_bottom_pll_relay_ins = {f'UNK{533 + n}': n for n in range(7)}
-_60b_bottom_pll_bus = {f'UNK{n}' for n in range(183, 191)}
-_60b_bottom_pll_bus_cells = {(73, 63), (73, 0), (54, 74), (55, 74), (27, 73), (18, 73)}
+# The right-hand PLLs do the same (IDE builds rpll, 2026-11-02): PLL_R[1]
+# (X144Y64, slot 2) takes CLKOUTn into UNK525+n at R57C145-146, onto bus line
+# UNK175+n; PLL_R[0] (X144Y37, slot 3) UNK517+n at R27C146, onto UNK167+n.
+# Their bus lines reach the centre's PCLKnA/B at R19C74 and R28C74 and the
+# clock tiles at R26-28C111. Without these nodes nextpnr took their outputs
+# over the fabric to an edge POSTGATE, and a 400 MHz clock routed that way
+# locked the DDRDLL in one build and not in another.
+# slot: (relay cells, relay input base, bus base, bus cells)
+_60b_pll_buses = {
+    18: ({(73, 63)}, 533, 183, {(73, 63), (73, 0), (54, 74), (55, 74), (27, 73), (18, 73)}),
+    2: ({(56, 144), (56, 145)}, 525, 175, {(56, 144), (56, 145), (18, 73), (27, 73), (25, 110), (26, 110), (27, 110)}),
+    3: ({(26, 145)}, 517, 167, {(26, 145), (18, 73), (27, 73), (25, 110), (26, 110), (27, 110)}),
+}
 
 def fse_create_pll_clock_aliases(db, device):
     # we know exactly where the PLL is and therefore know which aliases to create
@@ -2589,13 +2598,14 @@ def fse_create_pll_clock_aliases(db, device):
                             db.nodes.setdefault(w_src, ("PLL_O", set()))[1].add((row, col, w_src))
                             db.nodes.setdefault(w_dst, ("PLL_O", set()))[1].add((row, col, w_dst))
                     elif device in {'GW5AT-60B'}:
-                        if (row, col) in _60b_bottom_pll_bus_cells:
-                            for w in (w_src, w_dst):
-                                if w in _60b_bottom_pll_bus:
-                                    db.nodes.setdefault(f'BPLLBUS{w[3:]}', ("PLL_O", set()))[1].add((row, col, w))
-                        if (row, col) == _60b_bottom_pll_relay and w_src in _60b_bottom_pll_relay_ins:
-                            n = _60b_bottom_pll_relay_ins[w_src]
-                            db.nodes.setdefault(f'MPLL18CLKOUT{n}', ("PLL_O", set()))[1].add((row, col, w_src))
+                        for slot, (relays, rbase, bbase, bcells) in _60b_pll_buses.items():
+                            if (row, col) in bcells:
+                                for w in (w_src, w_dst):
+                                    if w.startswith('UNK') and bbase <= int(w[3:]) < bbase + 8:
+                                        db.nodes.setdefault(f'PLL{slot}BUS{w[3:]}', ("PLL_O", set()))[1].add((row, col, w))
+                            if (row, col) in relays and w_src.startswith('UNK') and rbase <= int(w_src[3:]) < rbase + 7:
+                                n = int(w_src[3:]) - rbase
+                                db.nodes.setdefault(f'MPLL{slot}CLKOUT{n}', ("PLL_O", set()))[1].add((row, col, w_src))
 
             # Himbaechel HCLK
             if (row, col) in db.hclk_pips:
