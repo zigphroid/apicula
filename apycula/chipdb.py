@@ -1998,6 +1998,7 @@ def add_hclk_bels(dat, dev, device):
     if device == 'GW5AT-60B':
         # the CLKDIV bels, then the rest as before
         gw5_add_hclk_bels(dat, dev, device)
+        gw5_60b_ihclk_links(dev)
     if device not in ("GW2A-18", "GW2A-18C", "GW1N-9", "GW1N-9C", "GW1N-1", "GW1NZ-1", "GW1NS-4", "GW1N-4"):
         to_connect = ['HCLK0_SECT0_IN', 'HCLK0_SECT1_IN', 'HCLK1_SECT0_IN', 'HCLK1_SECT1_IN']
         for x in range(dev.cols):
@@ -2432,15 +2433,46 @@ _dhcen_ce = {
 # HCLK buffer (BETA -> BUF_BI), with one gate bit per lane that gowin_pack
 # writes. Side 'H' marks these for the packer.
 _gw5a_dhcen_ce = { 'GW5AT-60B': { (73, 36): ['B0', 'B1', 'C2', 'C3']} }
+_gw5a_dhcen_lanes = False
 def gw5_create_dhcen(dev, device):
     for (row, col), ces in _gw5a_dhcen_ce[device].items():
         dhcen = dev.extra_func.setdefault((row, col), {}).setdefault('dhcen', [])
         hclk_idx = 4
-        for lane, ce in enumerate(ces):
+        # The per-lane gates (stop at the lane's buffer input; wr99o, board:
+        # q stops) are left out while the IDE's own arrangement is tried:
+        # their pips share BUF_BI4n with the inter-HCLK path's lane, and a
+        # lane gate there would be taken as well.
+        for lane, ce in enumerate(ces if _gw5a_dhcen_lanes else []):
             dst = f'HCLK_BUF_BI{hclk_idx}{lane}'
             src = f'HCLK_MUX_BETA{hclk_idx}{lane}'
             assert src in dev.hclk_pips[row, col][dst]
             dhcen.append({'pip': [f'X{col}Y{row}', dst, src, 'H'], 'ce': ce})
+        # the IDE's DHCE (pA): on the PLL's way into the inter-HCLK line,
+        # CEN on C2; gowin_pack writes the IDE's bits for it (side 'I')
+        dhcen.append({'pip': [f'X{col}Y{row}', 'HCLK_TO_IHCLK42', 'HCLK_UNK806', 'I'], 'ce': 'C2'})
+
+# GW5AT-60B: the links the IDE's DDR3 clock takes that no table lists
+# (IDE builds pA, unpacked): the bottom PLL's CLKOUT2 reaches bank 9's HCLK
+# block as HCLK_UNK806 with no fuse; TO_IHCLK42 there is one line with
+# FROM_IHCLK42 and the left block's FROM_IHCLK22, which feeds bank 9's and
+# the left bank's lane 3. The left block's DELTA23 takes that line with no
+# fuse of its own in the IDE's builds, so its listed bit is dropped.
+def gw5_60b_ihclk_links(dev):
+    def merge(keep, other, typ = None):
+        if other not in dev.nodes:
+            return
+        wt, ws = dev.nodes[keep]
+        ws.update(dev.nodes.pop(other)[1])
+        if typ:
+            dev.nodes[keep] = (typ, ws)
+        for w in ws:
+            wire2node[w] = keep
+    if 'MPLL18CLKOUT2' in dev.nodes:
+        merge('MPLL18CLKOUT2', 'HCLK4_HCLK_UNK806')
+    # PLL_O, so the global router may take it straight from the PLL
+    merge('HCLK4_HCLK_TO_IHCLK42', 'HCLK4_HCLK_FROM_IHCLK42', 'PLL_O')
+    merge('HCLK4_HCLK_TO_IHCLK42', 'HCLK2_HCLK_FROM_IHCLK22', 'PLL_O')
+    dev.hclk_pips[46, 0]['HCLK_MUX_DELTA23']['HCLK_FROM_IHCLK22'] = set()
 
 def fse_create_dhcen(dev, device, fse, dat: Datfile):
     if device in _gw5a_dhcen_ce:

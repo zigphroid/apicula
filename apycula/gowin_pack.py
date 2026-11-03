@@ -6754,11 +6754,29 @@ class GW5AT_60B(GW5A):
 
     # DHCE: a lane's gate bit in the HCLK block (IDE builds p97), on the pip
     # HCLK_UNK856/857/854/855 for lanes 0-3; CEN reaches it on its own wire.
+    # TO_IHCLK's own pip bits are in the HCLK block's table (IDE builds pA:
+    # (73,36) TO_IHCLK42 <- UNK806 at (32,83)); nothing more to write
+    def get_inter_hclk_fuses(self, x: int, y: int, src: str, dest: str) -> list[CellFuseBits]:
+        if dest.startswith('HCLK_TO_IHCLK'):
+            return []
+        return super().get_inter_hclk_fuses(x, y, src, dest)
+
+    _dhcen_ide = {
+        (73, 36): [(9, 119), (9, 118), (33, 18), (33, 85), (33, 107)],
+        (46, 0): [(3, 9), (3, 13), (4, 6)],
+        (73, 0): [(10, 15), (11, 11)],
+    }
     _dhcen_gate = {'0': (32, 56), '1': (33, 76), '2': (33, 18), '3': (33, 109)}
     def get_DHCEN_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         if 'DHCEN_USED' not in bel.cell.attrs:
             return []
         wire, side = self.chipdb.get_dhcen_wire_side(bel.x, bel.y, bel.idx_int)
+        if side == 'I':
+            # the IDE's DHCE bits (pA), by tile (row, col)
+            res = []
+            for (r, c), bits in self._dhcen_ide.items():
+                res.append(CellFuseBits(c, r, set(bits)))
+            return res
         assert side == 'H', f"DHCEN {bel.cell.name}: unknown side {side}"
         return [CellFuseBits(bel.x, bel.y, {self._dhcen_gate[wire[-1]]})]
     # The FCLK lane select, as the 25A's (the same attributes and values in
