@@ -7079,7 +7079,10 @@ class GW5AT_60B(GW5A):
         # both halves (the IDE's 'wr' build)
         if 'IOLOGIC_TX' in bel.cell.parms:
             self.chipdb.get_iob_attr_val(AttrVal('TRI_MUX', 'TMDDR'), av)
-        if str(bel.cell.attrs.get('SLEW_RATE', '')).strip('"') == 'FAST':
+        # (normalize_io_cell_attr has renamed SLEW_RATE to SLEWRATE by now;
+        # reading SLEW_RATE alone missed the IDE's (32,72)/(33,43), wl6 vs iwl6)
+        slew = bel.cell.attrs.get('SLEWRATE', bel.cell.attrs.get('SLEW_RATE', ''))
+        if str(slew).strip('"') == 'FAST':
             av.add(97)
         return self.get_iob_fuses(bel.x, bel.y, bel.idx_str, av)
 
