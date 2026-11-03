@@ -2427,7 +2427,25 @@ _dhcen_ce = {
          'L' : [(27,  0, 'A2'), (27,  0, 'A3'), (27,  0, 'D2'), (27,  0, 'D3'), (27,  0, 'D0'), (27,  0, 'D1')],
          'T' : [( 0, 27, 'A2'), ( 0, 27, 'A3'), ( 0, 27, 'D2'), ( 0, 27, 'D3'), (  0,27, 'D0'), ( 0, 27, 'D1')]},
         }
+# GW5AT-60B (IDE builds p97, bank 9's HCLK block): DHCE on lane n takes its
+# CEN on B0, B1, C2, C3 of (73,36) and stops the lane where it enters the
+# HCLK buffer (BETA -> BUF_BI), with one gate bit per lane that gowin_pack
+# writes. Side 'H' marks these for the packer.
+_gw5a_dhcen_ce = { 'GW5AT-60B': { (73, 36): ['B0', 'B1', 'C2', 'C3']} }
+def gw5_create_dhcen(dev, device):
+    for (row, col), ces in _gw5a_dhcen_ce[device].items():
+        dhcen = dev.extra_func.setdefault((row, col), {}).setdefault('dhcen', [])
+        hclk_idx = 4
+        for lane, ce in enumerate(ces):
+            dst = f'HCLK_BUF_BI{hclk_idx}{lane}'
+            src = f'HCLK_MUX_BETA{hclk_idx}{lane}'
+            assert src in dev.hclk_pips[row, col][dst]
+            dhcen.append({'pip': [f'X{col}Y{row}', dst, src, 'H'], 'ce': ce})
+
 def fse_create_dhcen(dev, device, fse, dat: Datfile):
+    if device in _gw5a_dhcen_ce:
+        gw5_create_dhcen(dev, device)
+        return
     if device not in _dhcen_ce:
         print(f'No DHCEN for {device} for now.')
         return
