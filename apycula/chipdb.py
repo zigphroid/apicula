@@ -1529,16 +1529,29 @@ def gw5_make_hclk_to_clk_gates(dev, device, fse, dat: Datfile):
 # The GW5A series has a different CLKDIV/CLKDIV2 configuration—each of the four
 # wires in a single HCLK block has its own dedicated CLKDIV/CLKDIV2. The inputs
 # for CLKDIV2 are HCLK_BUF_BO.
-_gw5a_hclk_locs = { 'GW5A-25A': { 0: (0, 64), 1: (36, 27), 2: (1, 0), 3: (34, 91)} }
+_gw5a_hclk_locs = { 'GW5A-25A': { 0: (0, 64), 1: (36, 27), 2: (1, 0), 3: (34, 91)},
+                    # GW5AT-60B: bank 9's HCLK block only so far (IDE builds
+                    # with a CLKDIV at BOTTOMSIDE[0..3], unpacked and diffed:
+                    # the same RESETN/CALIB wires as the 25A's)
+                    'GW5AT-60B': { 4: (73, 36)} }
+# GW5AT-60B: the CLKDIV outputs reach the clock network through this tile
+# (CLKDIV_O4n there drives the gates on to the PRIMARY muxes)
+_gw5a_clkdiv_out_locs = { 'GW5AT-60B': { 4: (73, 46)} }
+_gw5a_clkdiv_bus_cells = { 'GW5AT-60B': { 4: [(53, 74), (54, 74), (55, 74), (27, 73), (18, 73)]} }
 def gw5_add_hclk_bels(dat, dev, device):
     for hclk_idx, hclk_loc in _gw5a_hclk_locs[device].items():
         row, col = hclk_loc
         extra = dev.extra_func.setdefault((row, col), {})
-        extra_clkdiv2 = extra.setdefault('clkdiv2', {})
         extra_clkdiv = extra.setdefault('clkdiv', {})
-        extra_clkdiv2['hclk_idx'] = hclk_idx
         extra_clkdiv['hclk_idx'] = hclk_idx
+        if device == 'GW5A-25A':
+            extra_clkdiv2 = extra.setdefault('clkdiv2', {})
+            extra_clkdiv2['hclk_idx'] = hclk_idx
         for i in range(4):
+            if device != 'GW5A-25A':
+                # GW5AT-60B: no CLKDIV2 yet (its RESETN wires aren't known)
+                gw5_add_clkdiv_bel(dev, device, extra_clkdiv, hclk_idx, row, col, i)
+                continue
             # CLKDIV2
             dev.hclk_div2.setdefault(hclk_idx, set()).add((row, col, i))
             clkdiv2 = extra_clkdiv2.setdefault('bels', {}).setdefault(i, {})
@@ -1576,6 +1589,27 @@ def gw5_add_hclk_bels(dat, dev, device):
             add_node(dev, f'HCLK{hclk_idx}_{src}', "GLOBAL_CLK", row, col, src)
 
     return
+
+def gw5_add_clkdiv_bel(dev, device, extra_clkdiv, hclk_idx, row, col, i):
+    clkdiv = extra_clkdiv.setdefault('bels', {}).setdefault(i, {})
+    portmap = clkdiv.setdefault('inputs', {})
+    portmap['HCLKIN'] = f'CLKDIV_I{hclk_idx}{i}'
+    portmap['RESETN'] = f'C{i + 4}'
+    portmap['CALIB']  = ['B6', 'B7', 'C0', 'C1'][i]
+    make_hclk_pip(dev, hclk_idx, row, col, f'HCLK_MUX_ALPHA{hclk_idx}{i}', portmap['HCLKIN'])
+    portmap = clkdiv.setdefault('outputs', {})
+    portmap['CLKOUT'] = f'CLKDIV_O{hclk_idx}{i}'
+    src = portmap['CLKOUT']
+    add_node(dev, f'HCLK{hclk_idx}_{src}', "GLOBAL_CLK", row, col, src)
+    if hclk_idx in _gw5a_clkdiv_out_locs.get(device, {}):
+        orow, ocol = _gw5a_clkdiv_out_locs[device][hclk_idx]
+        add_node(dev, f'HCLK{hclk_idx}_{src}', "GLOBAL_CLK", orow, ocol, src)
+        # From there CLKDIV_O4n's gate drives UNK239+n, which is one wire
+        # with UNK239+n at R56C75, where it joins the centre's clock mux
+        # (UNK96 <- UNK239..242 in IDE build p97, bits as the fse says)
+        for brow, bcol in _gw5a_clkdiv_bus_cells.get(device, {}).get(hclk_idx, ()):
+            add_node(dev, f'UNK{239 + i}', "GLOBAL_CLK", orow, ocol, f'UNK{239 + i}')
+            add_node(dev, f'UNK{239 + i}', "GLOBAL_CLK", brow, bcol, f'UNK{239 + i}')
 
 # HCLK for Himbaechel
 #
@@ -1961,6 +1995,9 @@ def add_hclk_bels(dat, dev, device):
     if device in {'GW5A-25A'}:
         gw5_add_hclk_bels(dat, dev, device)
         return
+    if device == 'GW5AT-60B':
+        # the CLKDIV bels, then the rest as before
+        gw5_add_hclk_bels(dat, dev, device)
     if device not in ("GW2A-18", "GW2A-18C", "GW1N-9", "GW1N-9C", "GW1N-1", "GW1NZ-1", "GW1NS-4", "GW1N-4"):
         to_connect = ['HCLK0_SECT0_IN', 'HCLK0_SECT1_IN', 'HCLK1_SECT0_IN', 'HCLK1_SECT1_IN']
         for x in range(dev.cols):

@@ -6742,6 +6742,15 @@ class GW5A_25A(GW5A):
 ################################################################
 class GW5AT_60B(GW5A):
     """ GW5AT-60B chip. TangCosole60k board """
+
+    # CLKDIV: one per HCLK lane, its ratio HCLKDIVn_DIV for lane n, as the
+    # 25A's (IDE builds p97: lane 0 DIV4 at (32,29), 1 (33,11), 2 (33,3),
+    # 3 (33,117) of the bank 9 HCLK block). No CLKDIV2 yet.
+    def get_CLKDIV_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        return GW5A_25A.get_CLKDIV_fuses(self, bel)
+
+    def get_CLKDIV2_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        self.error_not_supported_cell_type(bel)
     # The FCLK lane select, as the 25A's (the same attributes and values in
     # the 60B's IOLOGIC tables; Sipeed's cam2dvi sets lane 1's fuses).
     _fclk_out_sel = {
