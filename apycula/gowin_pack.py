@@ -7172,6 +7172,10 @@ class GW5AT_60B(GW5A):
             raise Exception(f"{bel.cell.name}: MODDRX4 with no DQS write clock (DQS_WCLK {wclk!r})")
         attr_vals = [AttrVal('LSRIMUX_0', '0'), AttrVal('OUTMODE', 'MODDRX4'), AttrVal('CLKOMUX', 'ENABLE'),
                      AttrVal('OCLKCE', 'CE'), AttrVal('WRFCLKSEL', wclk)]
+        # OSER8_MEM's own HWL (not the DQS block's): Gowin's model loads the
+        # TCLK-side word one TCLK later with it (iwr14r's halved beats)
+        if str(bel.cell.parms.get('HWL', 'false')).strip('"').upper() == 'TRUE':
+            attr_vals.append(AttrVal('HWL', 'TRUE'))
         if bel.fclk in self._fclk_out_sel:
             attr_vals += [AttrVal(a, v) for a, v in self._fclk_out_sel[bel.fclk]]
         return attr_vals
