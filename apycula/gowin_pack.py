@@ -6758,6 +6758,14 @@ class GW5AT_60B(GW5A):
     # (73,36) TO_IHCLK42 <- UNK806 at (32,83)); nothing more to write
     def get_inter_hclk_fuses(self, x: int, y: int, src: str, dest: str) -> list[CellFuseBits]:
         if dest.startswith('HCLK_TO_IHCLK'):
+            # The bottom PLL's CLKOUT2 into bank 9's inter-HCLK line (IDE
+            # builds pA/pB): the line's enable, sv HCLK TO_IHCLK2 (32,86),
+            # and four bits at (73,63) that take CLKOUT2 there (UNK535 ->
+            # (73,36) UNK806; no table names them). Without them the line
+            # is dead (wr100p, board).
+            if (x, y, dest, src) == (36, 73, 'HCLK_TO_IHCLK42', 'HCLK_UNK806'):
+                return [CellFuseBits(36, 73, {(32, 86)}),
+                        CellFuseBits(63, 73, {(32, 62), (32, 75), (32, 80), (32, 83)})]
             return []
         return super().get_inter_hclk_fuses(x, y, src, dest)
 
