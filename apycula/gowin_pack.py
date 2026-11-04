@@ -6765,15 +6765,29 @@ class GW5AT_60B(GW5A):
     def get_inter_hclk_fuses(self, x: int, y: int, src: str, dest: str) -> list[CellFuseBits]:
         if dest.startswith('HCLK_TO_IHCLK'):
             # The bottom PLL's CLKOUT2 into bank 9's inter-HCLK line (IDE
-            # builds pA/pB): the line's enable, sv HCLK TO_IHCLK2 (32,86),
-            # and four bits at (73,63) that take CLKOUT2 there (UNK535 ->
-            # (73,36) UNK806; no table names them). Without them the line
-            # is dead (wr100p, board).
+            # builds pA/pB): the line's enable, sv HCLK TO_IHCLK2 (32,86).
             if (x, y, dest, src) == (36, 73, 'HCLK_TO_IHCLK42', 'HCLK_UNK806'):
-                return [CellFuseBits(36, 73, {(32, 86)}),
-                        CellFuseBits(63, 73, {(32, 62), (32, 75), (32, 80), (32, 83)})]
+                self._ihclk_feed = True
+                return [CellFuseBits(36, 73, {(32, 86)})]
             return []
         return super().get_inter_hclk_fuses(x, y, src, dest)
+
+    # The bottom PLL's feed into bank 9's inter-HCLK line also needs bits in
+    # the DDR DLL's tile (73, 0), the IDE's pAs/pAd against ours on the board
+    # (2026-11-04, pG/pH): DLL0 feature 4 (1, 14) where gowin_pack's DDRDLL
+    # default has 5 (2, 2), and an undecoded pair that follows the FCLK
+    # source, (10, 13) (11, 1) for the ungated feed, (10, 15) (11, 11) behind
+    # the DHCE (written by get_DHCEN_fuses). Without either, nothing on the
+    # line clocks: the pair looks like the tile's HCLK source select, which
+    # the DLL shares.
+    def get_final_fuses(self) -> list[CellFuseBits]:
+        fuses = super().get_final_fuses()
+        if getattr(self, '_ihclk_feed', False):
+            ttyp = self.chipdb.get_ttyp(0, 73)
+            fuses.append(CellFuseBits(0, 73, get_shortval_fuses(self.chipdb.db, ttyp, {4}, 'DLL0')))
+            if not getattr(self, '_ihclk_gated', False):
+                fuses.append(CellFuseBits(0, 73, {(10, 13), (11, 1)}))
+        return fuses
 
     _dhcen_ide = {
         (73, 36): [(9, 119), (9, 118), (33, 18), (33, 85), (33, 107)],
@@ -6786,6 +6800,7 @@ class GW5AT_60B(GW5A):
             return []
         wire, side = self.chipdb.get_dhcen_wire_side(bel.x, bel.y, bel.idx_int)
         if side == 'I':
+            self._ihclk_gated = True
             # the IDE's DHCE bits (pA), by tile (row, col)
             res = []
             for (r, c), bits in self._dhcen_ide.items():
@@ -7182,6 +7197,11 @@ class GW5AT_60B(GW5A):
             av.add(5 + code)
         if 'DDRDLL_RESET_TIED' in bel.cell.attrs:
             av.add(19)
+        if getattr(self, '_ihclk_feed', False):
+            # the inter-HCLK feed takes DLL0 feature 4 in place of 5 (see
+            # get_final_fuses); route() runs before place(), so the flag is set
+            av.discard(5)
+            av.add(4)
         y, x = self.chipdb.db.extra_func[(bel.y, bel.x)]['ddrdll']['fuse_loc']
         ttyp = self.chipdb.get_ttyp(x, y)
         bits = get_shortval_fuses(self.chipdb.db, ttyp, av, 'DLL0')
