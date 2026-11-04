@@ -32,33 +32,106 @@ for _name, (_, _members) in db.nodes.items():
     for _r, _c, _w in _members:
         _node[(_r, _c, _w)] = 'N:' + _name
 _HOP = {'N': (1, 0, 'SN'), 'S': (-1, 0, 'SN'), 'E': (0, -1, 'EW'), 'W': (0, 1, 'EW')}
+_shape = {}     # wire name -> how key() names it, worked out once per name
 
 
-def key(r, c, w):
-    """A wire's chip-wide name. GW5A's 1-hop tracks 1/2 are named for the tile they leave."""
+def _wire_shape(w):
     m = re.match(r'([NSEW])1([12])(\d)$', w)
     if m:
         dr, dc, k = _HOP[m[1]]
         s = int(m[3])
-        return f'R{r + dr * s + 1}C{c + dc * s + 1}_{k}{m[2]}0'
-    return _node.get((r, c, w)) or chipdb.wire2global(r + 1, c + 1, db, w)
+        return dr * s, dc * s, f'_{k}{m[2]}0'
+    if w in ('VCC', 'VSS'):
+        return w
+    return None if re.match(r'[NESW][128]\d\d', w) else f'_{w}'
+
+
+def key(r, c, w):
+    """A wire's chip-wide name. GW5A's 1-hop tracks 1/2 are named for the tile they leave."""
+    n = _node.get((r, c, w))
+    if n:
+        sh = _shape.get(w, 0)
+        if sh == 0:
+            sh = _shape[w] = _wire_shape(w)
+        if type(sh) is not tuple:
+            return n
+    else:
+        sh = _shape.get(w, 0)
+        if sh == 0:
+            sh = _shape[w] = _wire_shape(w)
+        if sh is None:
+            return chipdb.wire2global(r + 1, c + 1, db, w)
+        if type(sh) is str:
+            return sh if sh[0] != '_' else f'R{r + 1}C{c + 1}{sh}'
+    return f'R{r + sh[0] + 1}C{c + sh[1] + 1}{sh[2]}'
+
+
+_tabs = {}      # tile type -> its muxes, with what doesn't change from tile to tile
+
+
+def _mux_rows(kind, tab):
+    rows = []
+    for dst, srcs in tab.items():
+        look = {}
+        for s, b in srcs.items():
+            look.setdefault(frozenset(map(tuple, b)), s)
+        rows.append((f'{kind}|{dst}', frozenset().union(*look), look))
+    return rows
+
+
+def decode_tile(r, c, on):
+    """A tile's active routing, {"kind|dest": [src, bits]}, from its set bits: gowin_unpack's
+    exact-match rule with default=True, so no bits set means the empty-bit source."""
+    ty = db.grid[r][c]
+    if ty not in _tabs:
+        t = db.tiles[ty]
+        rows = _mux_rows('pip', t.pips) + _mux_rows('cpip', t.clock_pips)
+        _tabs[ty] = rows, {k: [look[frozenset()], []] for k, _, look in rows if frozenset() in look}
+    rows, default = _tabs[ty]
+    extra = _mux_rows('hclk', db.hclk_pips.get((r, c), {})) + \
+        _mux_rows('hclkx', db.extra_func.get((r, c), {}).get('hclk_pips', {}))
+    if not on and not extra:
+        return default
+    d = {}
+    for k, allb, look in rows + extra:
+        used = allb & on
+        s = look.get(used)
+        if s is not None:
+            d[k] = [s, sorted(used)]
+        elif used:
+            d[k] = [None, sorted(used)]
+    return d
+
+
+def tile_entries(rc, d):
+    """A decoded tile as graph entries: (source wire, tile, kind, dest, source, bits), with the dest's key."""
+    r, c = rc
+    names = {}
+    for kd, (src, bits) in d.items():
+        if src is None:
+            continue
+        kind, dst = kd.split('|')
+        ks = names.get(src) or names.setdefault(src, key(r, c, src))
+        kt = names.get(dst) or names.setdefault(dst, key(r, c, dst))
+        yield kt, (ks, rc, kind, dst, src, tuple(map(tuple, bits)))
+
+
+def routes_graph(rt):
+    """Decoded tiles as (graph, readers): graph[wire] lists what drives it, readers[wire] the active
+    muxes that read it. rt is {"r,c": decoded tile}."""
+    graph, readers = {}, collections.defaultdict(list)
+    for rc, d in rt.items():
+        rc = tuple(map(int, rc.split(',')))
+        for kt, e in tile_entries(rc, d):
+            graph.setdefault(kt, []).append(e)
+            if e[5]:
+                readers[e[0]].append((rc, e[2], e[3]))
+    return graph, readers
 
 
 def load_routes(fn):
-    """An rtile.py file as (graph, readers): graph[wire] lists what drives it,
-    readers[wire] lists the active muxes that read it."""
-    graph, readers = {}, collections.defaultdict(list)
-    for rc, d in json.load(open(fn)).items():
-        r, c = map(int, rc.split(','))
-        for kd, (src, bits) in d.items():
-            kind, dst = kd.split('|')
-            if src is None:
-                continue
-            e = (key(r, c, src), (r, c), kind, dst, src, tuple(map(tuple, bits)))
-            graph.setdefault(key(r, c, dst), []).append(e)
-            if bits:
-                readers[key(r, c, src)].append(((r, c), kind, dst))
-    return graph, readers
+    """An rtile.py file as (graph, readers)."""
+    return routes_graph(json.load(open(fn)))
 
 
 def trace(graph, k):

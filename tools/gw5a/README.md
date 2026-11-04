@@ -55,6 +55,23 @@ line: `label row col wire [base_wire]`. Exits 1 on any difference.
 `exact.py` can pass on an edit that puts a load on the wrong net, since it
 only compares bits with the ops. Run `gcheck.py` as well.
 
+### gw5a_shell.py: the tools in one long-lived process
+
+    gw5a_shell.py [--socket PATH] [--plugin FILE.py ...]
+
+Loading and decoding a build takes seconds, and a change touches few tiles, so
+this keeps builds in memory and takes commands from stdin, or from each
+connection to the unix socket. `edit` re-decodes only the tiles an edit
+changes, and `exact` can read the written file back:
+
+    load base base.fs
+    edit new base edit.ops
+    write new new.fs
+    exact base new edit.ops new.fs
+    check new base
+
+The command list is at the top of the file. A plugin adds commands of its own.
+
 ## Example: round trip
 
 Reversing an edit should give back the base byte for byte:
