@@ -1806,7 +1806,13 @@ class Device:
                     default_io_type = self.get_default_tlvds_io_type()
                     bank_desc.set_attr("IO_TYPE", default_io_type)
                 if bank_desc.has_lvds_outputs:
-                    bank_desc.force_bank_vccio(self.get_lvds_bank_vccio())
+                    # A bank of SSTL/HSTL (DDR3's: SSTL15_I data, SSTL15D
+                    # strobes) keeps its own VCCIO: the IDE writes 1.5 for
+                    # the 60K's bank 9 (builds pB), not the LVDS 1.2.
+                    if bank_desc.io_type and bank_desc.io_type.startswith(('SSTL', 'HSTL')) and bank_desc.lvds_BANK_VCCIO:
+                        bank_desc.force_bank_vccio(bank_desc.lvds_BANK_VCCIO)
+                    else:
+                        bank_desc.force_bank_vccio(self.get_lvds_bank_vccio())
                 if not bank_desc.bank_pull_strength:
                     default_pull_strength = self.get_default_pull_strength()
                     bank_desc.set_attr("PULL_STRENGTH", default_pull_strength)
