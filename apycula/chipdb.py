@@ -2458,6 +2458,10 @@ def gw5_create_dhcen(dev, device):
 # the left bank's lane 3. The left block's DELTA23 takes that line with no
 # fuse of its own in the IDE's builds, so its listed bit is dropped.
 def gw5_60b_ihclk_links(dev):
+    # debug (scratch): build a chipdb without these links
+    import os
+    if os.environ.get('PB60_NO_IHCLK'):
+        return
     def merge(keep, other, typ = None):
         if other not in dev.nodes:
             return

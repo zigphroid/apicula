@@ -6775,18 +6775,15 @@ class GW5AT_60B(GW5A):
     # The bottom PLL's feed into bank 9's inter-HCLK line also needs bits in
     # the DDR DLL's tile (73, 0), the IDE's pAs/pAd against ours on the board
     # (2026-11-04, pG/pH): DLL0 feature 4 (1, 14) where gowin_pack's DDRDLL
-    # default has 5 (2, 2), and an undecoded pair that follows the FCLK
-    # source, (10, 13) (11, 1) for the ungated feed, (10, 15) (11, 11) behind
-    # the DHCE (written by get_DHCEN_fuses). Without either, nothing on the
-    # line clocks: the pair looks like the tile's HCLK source select, which
-    # the DLL shares.
+    # default has 5 (2, 2), and an undecoded pair (10, 13) (11, 1). Behind
+    # the DHCE the IDE adds (10, 15) (11, 11) to them (get_DHCEN_fuses).
+    # Without any of these, nothing on the line clocks (pH, pJ).
     def get_final_fuses(self) -> list[CellFuseBits]:
         fuses = super().get_final_fuses()
         if getattr(self, '_ihclk_feed', False):
             ttyp = self.chipdb.get_ttyp(0, 73)
             fuses.append(CellFuseBits(0, 73, get_shortval_fuses(self.chipdb.db, ttyp, {4}, 'DLL0')))
-            if not getattr(self, '_ihclk_gated', False):
-                fuses.append(CellFuseBits(0, 73, {(10, 13), (11, 1)}))
+            fuses.append(CellFuseBits(0, 73, {(10, 13), (11, 1)}))
         return fuses
 
     _dhcen_ide = {
