@@ -7080,9 +7080,12 @@ class GW5AT_60B(GW5A):
     # _dqs_base; DQS_MODE adds its own (X1 none), RD_PNTR bit k is feature
     # 13 + k, HWL 27, FIFO_MODE_SEL 1 is 10 and 19, and RESET left
     # unconnected is 23 (the IDE's RESET tied 1). The features' own names
-    # are not known.
+    # are not known. 34-36 and 37-39 are two 2-bit fields, (32,79)(32,80) and
+    # (32,82)(32,83): X4 builds with HWL take 36 and 39, and a DDR3 read on
+    # the Tang Console 60K doesn't work without 36 (39 alone changes nothing
+    # we can see). What sets them in other modes isn't known.
     _dqs_base = {11, 12, 17, 18, 21, 22, 26, 34, 37, 57, 59, 60, 61}
-    _dqs_mode = {'X1': set(), 'X2_DDR2': {28}, 'X2_DDR3': {29}, 'X2_DDR3_EXT': {30}, 'X4': {33}}
+    _dqs_mode = {'X1': set(), 'X2_DDR2': {28}, 'X2_DDR3': {29}, 'X2_DDR3_EXT': {30}, 'X4': {33, 36, 39}}
 
     def get_DQS_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         parms = bel.cell.parms
