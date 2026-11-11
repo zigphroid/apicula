@@ -7016,11 +7016,23 @@ class GW5AT_60B(GW5A):
             # VREF generator on: the IDE's VREF=INTERNAL, which is also what
             # it builds when no VREF is given (GW5AT-60B, IDE 1.9.12). An
             # external VREF (VREF1_LOAD, with a VREF1_DRIVER pin) isn't done.
+            # The IDE also sets two more of the bank's fields for it, which
+            # the common code never does: attribute 73 at value 308 (a
+            # two-bit field, 306 and 307 its single bits; names unknown)
+            # and attribute 65 at 3.3 with the bank's VCCIO (1.5). Without
+            # them DDR3 reads at 400 MHz flipped DQ1 on the Tang Console
+            # 60K (pectinos #2058: the open build with only these three
+            # bits set read clean when training settled where the IDE's
+            # does); 333 MHz read clean either way.
             if any(bel.cell.typ in {'IBUF', 'IOBUF'} and bel.cell.attrs.get('IO_TYPE') == 'SSTL15_I'
                    for bel in bank_desc.bels):
                 av = set()
-                for attr, val in (('IO_TYPE', 'SSTL15_I'), ('PADDI', 'PADDI'), ('VREF', 'INTERNAL')):
+                for attr, val in (('IO_TYPE', 'SSTL15_I'), ('PADDI', 'PADDI'), ('VREF', 'INTERNAL'),
+                                  ('BANK_VCCIO', '1.5'), ('IOB_UNKNOWN65', '3.3')):
                     self.chipdb.get_bank_attr_val(AttrVal(attr, val), av)
+                attrval = self.chipdb.db.logicinfo['IOB'].get((73, 308))
+                if attrval:
+                    av.add(attrval)
                 bits = self.chipdb.get_bank_fuses(bank_desc.x, bank_desc.y, av, bank)
                 if bits:
                     fuses.append(CellFuseBits(bank_desc.x, bank_desc.y, bits))
