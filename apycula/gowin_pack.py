@@ -5905,20 +5905,12 @@ class GW5A(Device):
         return super().__repr__()  + f"| extra_slots:{self.extra_slots}, _no_pullup_cfgs:{self._no_pullup_cfgs} "
 
 ################################################################
-class GW5A_25A(GW5A):
-    """ GW5A-25A chip. Tangprimer25k board """
-    def __init__(self, cli_args: CliArgs, pnr: Netlist):
-        super().__init__(cli_args, pnr)
-        # The GW5A-25A has an interesting phenomenon on the bottom side of the
-        # chip: if certain pins are used as a clock source (this also applies
-        # to the standard soldered E2) and the routing passes through HCLK,
-        # fuses are set not only in this IBUF, but also in another one. The
-        # purpose of this mechanism is unclear; we have only found a few such
-        # pins and are repeating this process.
-        self.hclk_io_pairs = {(11, 36): (30, 36), (25, 36): (32, 36), (53, 36): (28, 36), (74, 36): (90, 36), }
-        self.used_clock_spines = set()
-        # default attrs for DSP
-        self.multaddalu12x12_defaults = [
+class GW5A_DSP:
+    """ The GW5A family's DSP (MULT12X12, MULTADDALU12X12, MULTALU27X18 and
+    MULT27X36, packed by nextpnr as two MULTALU27X18), shared by the chips
+    whose DSP fuses are known: the GW5A-25A and the GW5AT-60B. """
+    # default attrs for DSP
+    multaddalu12x12_defaults = [
                 ('A0REG_CLK', 'BYPASS'), ('A0REG_CE', 'CE0'), ('A0REG_RESET', 'RESET0'),
                 ('B0REG_CLK', 'BYPASS'), ('B0REG_CE', 'CE0'), ('B0REG_RESET', 'RESET0'),
                 ('A1REG_CLK', 'BYPASS'), ('A1REG_CE', 'CE0'), ('A1REG_RESET', 'RESET0'),
@@ -5932,7 +5924,7 @@ class GW5A_25A(GW5A):
                 ('MULT_RESET_MODE', 'SYNC'), ('ADD_SUB_0', 0), ('DYN_ADD_SUB_0', 'FALSE'), ('FB_PREG_EN', 'FALSE'),
                 ('ADD_SUB_1', 0), ('DYN_ADD_SUB_1', 'FALSE'), ('CASI_SEL', 0), ('ACC_SEL', 0), ('DYN_ACC_SEL', 'FALSE'),
                 ]
-        self.multalu27x18_defaults = [
+    multalu27x18_defaults = [
                 ('C_IREG_CLK', 'BYPASS'), ('C_IREG_CE', 'CE0'), ('C_IREG_RESET', 'RESET0'),
                 ('C_PREG_CLK', 'BYPASS'), ('C_PREG_CE', 'CE0'), ('C_PREG_RESET', 'RESET0'),
                 ('PADDSUB_IREG_CLK', 'BYPASS'), ('PADDSUB_IREG_CE', 'CE0'), ('PADDSUB_IREG_RESET', 'RESET0'),
@@ -5952,6 +5944,248 @@ class GW5A_25A(GW5A):
                 ('ADD_SUB_1', 0), ('DYN_ADD_SUB_1', 'FALSE'), ('ACC_SEL', 0),
                 ('DYN_ACC_SEL', 'FALSE'), ('C_SEL', 0), ('DYN_C_SEL', 'FALSE'), ('MULT12X12_EN', 'FALSE')
                 ]
+
+    #==============================
+    #========== DSP
+    #==============================
+    def common_dsp_handler(self, bel: BelDesc, attr_vals: list[AttrVal]) -> list[CellFuseBits]:
+        av =  set()
+        for attrval in attr_vals:
+            self.chipdb.get_dsp5_attr_val(attrval, av)
+
+        fuses = []
+        bels_x_y = self.get_dsp_bels(bel)
+        for x_y in bels_x_y:
+            x, y = x_y
+            bits = self.chipdb.get_dsp5_fuses(x, y, av)
+            if bits:
+                fuses.append(CellFuseBits(x, y, bits))
+        return fuses
+
+    def set_mult12x12_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
+        """ 12x12 """
+        attr_vals = []
+        cell_parms = bel.cell.parms
+        cell_attrs = bel.cell.attrs
+
+        pair_idx = dsp_indices.pair_idx
+        idx = dsp_indices.idx
+        is_even = dsp_indices.is_even
+
+        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
+        attr_vals.append(AttrVal('UNK_192', 'UNK_23'))
+        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
+        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
+        if idx:
+            attr_vals.append(AttrVal('MULT12_1_EN', 'TRUE'))
+        else:
+            attr_vals.append(AttrVal('MULT12X12_EN', 'TRUE'))
+            attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))  # connect the first multiplier as operand 0 ALU — it will be placed in the lower bits of the result.
+
+        for parm in ['AREG_CLK', 'BREG_CLK', 'PREG_CLK', 'OREG_CLK']:
+            val = cell_parms.get(parm, 'BYPASS')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        for parm in ['AREG_CE', 'BREG_CE', 'PREG_CE', 'OREG_CE']:
+            val = cell_parms.get(parm, 'CE0')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        for parm in ['AREG_RESET', 'BREG_RESET', 'PREG_RESET', 'OREG_RESET']:
+            val = cell_parms.get(parm, 'RESET0')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        attr = 'MULT_RESET_MODE'
+        val = cell_parms.get(attr, 'SYNC')
+        attr_vals.append(AttrVal(attr, val))
+
+        return attr_vals
+
+    def set_multaddalu12x12_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
+        """ 12x12 """
+        attr_vals = []
+        cell_parms = bel.cell.parms
+        cell_attrs = bel.cell.attrs
+
+        pair_idx = dsp_indices.pair_idx
+        idx = dsp_indices.idx
+        is_even = dsp_indices.is_even
+
+        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
+        attr_vals.append(AttrVal('UNK_192', 'UNK_23')) # see mult12x12
+        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
+        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
+        attr_vals.append(AttrVal('MULT12_1_EN', 'TRUE'))
+        attr_vals.append(AttrVal('MULT12X12_EN', 'TRUE'))
+        attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))
+        attr_vals.append(AttrVal('ALU', 'ENABLE'))
+        attr_vals.append(AttrVal('UNK_CLK_191', 'CLK0')) # XXX find out whose clock this is
+
+        if "USE_CASCADE_OUT" in cell_attrs:
+            attr_vals.append(AttrVal('CASO', 'ENABLE'))
+
+        for parm in [('OREG_CLK', 'BYPASS'), ('OREG_CE', 'CE0'), ('OREG_RESET', 'RESET0')]:
+            attr, default = parm
+            attr_vals.append(AttrVal(f'{attr[0]}0{attr[1:]}', cell_parms.get(attr, default)))
+            attr_vals.append(AttrVal(f'{attr[0]}1{attr[1:]}', cell_parms.get(attr, default)))
+
+        attr = 'DYN_CASI_SEL'
+        val = cell_parms.get(attr, 'FALSE')
+        attr_vals.append(AttrVal(attr, val))
+        if val == 'TRUE':
+            # XXX It seems that this input requires inversion.
+            attr_vals.append(AttrVal('CASISEL_PAD', 'INV'))
+
+        for parm in [('PREG0_CLK', 'BYPASS'), ('PREG0_CE', 'CE0'), ('PREG0_RESET', 'RESET0'),
+                     ('PREG1_CLK', 'BYPASS'), ('PREG1_CE', 'CE0'), ('PREG1_RESET', 'RESET0')]:
+            attr, default = parm
+            attr_vals.append(AttrVal(f'P{attr[4]}REG{attr[5:]}', cell_parms.get(attr, default)))
+
+        for parm in [('ACCSEL_IREG_CLK', 'BYPASS'), ('ACCSEL_IREG_CE', 'CE0'), ('ACCSEL_IREG_RESET', 'RESET0'),
+                     ('ACCSEL_PREG_CLK', 'BYPASS'), ('ACCSEL_PREG_CE', 'CE0'), ('ACCSEL_PREG_RESET', 'RESET0')]:
+            attr, default = parm
+            val = cell_parms.get(attr, default)
+            attr_vals.append(AttrVal(f'ACCSEL_0{attr[6:]}', val))
+            attr_vals.append(AttrVal(f'ACCSEL_1{attr[6:]}', val))
+
+        attr = 'PRE_LOAD'
+        val = cell_parms.get(attr, 0)
+        pre_load = str(val)
+        if len(pre_load) > 58:
+            pre_load = pre_load[-48:]
+        else:
+            pre_load = pre_load.rjust(48, '0')
+        for bitnum, pre_loadbit in enumerate(pre_load[::-1]):
+            attr_vals.append(AttrVal(f'PRELOAD_BIT_{bitnum}', pre_loadbit))
+
+        for parm in self.multaddalu12x12_defaults:
+            attr, default = parm
+            attr_vals.append(AttrVal(attr, cell_parms.get(attr, default)))
+
+        return attr_vals
+
+    def set_multalu27x18_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
+        """ 27x18 """
+        attr_vals = []
+        cell_parms = bel.cell.parms
+        cell_attrs = bel.cell.attrs
+
+        pair_idx = dsp_indices.pair_idx
+        idx = dsp_indices.idx
+        is_even = dsp_indices.is_even
+
+        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
+        attr_vals.append(AttrVal('UNK_192', 'UNK_23')) # see mult12x12
+        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
+        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
+        attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))
+        attr_vals.append(AttrVal('ALU', 'ENABLE'))
+        attr_vals.append(AttrVal('UNK_CLK_191', 'CLK0')) # XXX find out whose clock this is
+
+        if "MULT27X36_MAIN" in cell_attrs:
+            attr_vals.append(AttrVal('MULT27X36', 'ENABLE'))
+        elif "MULT27X36_AUX" in cell_attrs:
+            attr_vals.append(AttrVal('CASI_SEL', 1))
+        else:
+            attr = 'CASI_SEL'
+            val = int(cell_parms.get(attr, '0'), 2)
+            attr_vals.append(AttrVal(attr, val))
+
+        if "USE_CASCADE_OUT" in cell_attrs:
+            attr_vals.append(AttrVal('CASO', 'ENABLE'))
+
+        for parm in [('OREG_CLK', 'BYPASS'), ('OREG_CE', 'CE0'), ('OREG_RESET', 'RESET0')]:
+            attr, default = parm
+            attr_vals.append(AttrVal(f'{attr[0]}0{attr[1:]}', cell_parms.get(attr, default)))
+            attr_vals.append(AttrVal(f'{attr[0]}1{attr[1:]}', cell_parms.get(attr, default)))
+
+        attr = 'DYN_CASI_SEL'
+        val = cell_parms.get(attr, 'FALSE')
+        attr_vals.append(AttrVal(attr, val))
+        if val == 'TRUE':
+            # XXX It seems that this input requires inversion.
+            attr_vals.append(AttrVal('CASISEL_PAD', 'INV'))
+
+        for parm in ['AREG_CLK', 'BREG_CLK']:
+            val = cell_parms.get(parm, 'BYPASS')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        for parm in ['AREG_CE', 'BREG_CE']:
+            val = cell_parms.get(parm, 'CE0')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        for parm in ['AREG_RESET', 'BREG_RESET']:
+            val = cell_parms.get(parm, 'RESET0')
+            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
+
+        for parm in [('DREG_CLK', 'BYPASS'), ('DREG_CE', 'CE0'), ('DREG_RESET', 'RESET0')]:
+            attr, default = parm
+            attr_vals.append(AttrVal(f'A1{attr[1:]}', cell_parms.get(attr, default)))
+            attr_vals.append(AttrVal(f'B1{attr[1:]}', cell_parms.get(attr, default)))
+
+        for parm in [('PREG_CLK', 'BYPASS'), ('PREG_CE', 'CE0'), ('PREG_RESET', 'RESET0')]:
+            attr, default = parm
+            attr_vals.append(AttrVal(f'P0{attr[1:]}', cell_parms.get(attr, default)))
+
+        for parm in [('ACCSEL_IREG_CLK', 'BYPASS'), ('ACCSEL_IREG_CE', 'CE0'), ('ACCSEL_IREG_RESET', 'RESET0'),
+                     ('ACCSEL_PREG_CLK', 'BYPASS'), ('ACCSEL_PREG_CE', 'CE0'), ('ACCSEL_PREG_RESET', 'RESET0')]:
+            attr, default = parm
+            val = cell_parms.get(attr, default)
+            attr_vals.append(AttrVal(f'ACCSEL_0{attr[6:]}', val))
+            attr_vals.append(AttrVal(f'ACCSEL_1{attr[6:]}', val))
+
+        attr = 'PRE_LOAD'
+        val = cell_parms.get(attr, 0)
+        pre_load = str(val)
+        if len(pre_load) > 58:
+            pre_load = pre_load[-48:]
+        else:
+            pre_load = pre_load.rjust(48, '0')
+        for bitnum, pre_loadbit in enumerate(pre_load[::-1]):
+            attr_vals.append(AttrVal(f'PRELOAD_BIT_{bitnum}', pre_loadbit))
+
+        for parm in self.multalu27x18_defaults:
+            attr, default = parm
+            attr_vals.append(AttrVal(attr, cell_parms.get(attr, default)))
+
+        return attr_vals
+
+
+    def get_MULT12X12_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        """ 12x12 """
+        dsp_indices = self.decode_dsp_indices(bel)
+        attr_vals = self.set_mult12x12_attrvals(bel, dsp_indices)
+
+        return self.common_dsp_handler(bel, attr_vals)
+
+    def get_MULTADDALU12X12_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        """ 12x12 """
+        dsp_indices = self.decode_dsp_indices(bel)
+        attr_vals = self.set_multaddalu12x12_attrvals(bel, dsp_indices)
+
+        return self.common_dsp_handler(bel, attr_vals)
+
+    def get_MULTALU27X18_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
+        """ 27x18 and 27x36 """
+        dsp_indices = self.decode_dsp_indices(bel)
+        attr_vals = self.set_multalu27x18_attrvals(bel, dsp_indices)
+
+        return self.common_dsp_handler(bel, attr_vals)
+
+
+
+################################################################
+class GW5A_25A(GW5A_DSP, GW5A):
+    """ GW5A-25A chip. Tangprimer25k board """
+    def __init__(self, cli_args: CliArgs, pnr: Netlist):
+        super().__init__(cli_args, pnr)
+        # The GW5A-25A has an interesting phenomenon on the bottom side of the
+        # chip: if certain pins are used as a clock source (this also applies
+        # to the standard soldered E2) and the routing passes through HCLK,
+        # fuses are set not only in this IBUF, but also in another one. The
+        # purpose of this mechanism is unclear; we have only found a few such
+        # pins and are repeating this process.
+        self.hclk_io_pairs = {(11, 36): (30, 36), (25, 36): (32, 36), (53, 36): (28, 36), (74, 36): (90, 36), }
+        self.used_clock_spines = set()
         # ADC pins are not the normal pins, do them separately
         self.adc_ios = []
 
@@ -6514,239 +6748,12 @@ class GW5A_25A(GW5A):
     def get_CLKDIV2_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
         return []
 
-    #==============================
-    #========== DSP
-    #==============================
-    def common_dsp_handler(self, bel: BelDesc, attr_vals: list[AttrVal]) -> list[CellFuseBits]:
-        av =  set()
-        for attrval in attr_vals:
-            self.chipdb.get_dsp5_attr_val(attrval, av)
-
-        fuses = []
-        bels_x_y = self.get_dsp_bels(bel)
-        for x_y in bels_x_y:
-            x, y = x_y
-            bits = self.chipdb.get_dsp5_fuses(x, y, av)
-            if bits:
-                fuses.append(CellFuseBits(x, y, bits))
-        return fuses
-
-    def set_mult12x12_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
-        """ 12x12 """
-        attr_vals = []
-        cell_parms = bel.cell.parms
-        cell_attrs = bel.cell.attrs
-
-        pair_idx = dsp_indices.pair_idx
-        idx = dsp_indices.idx
-        is_even = dsp_indices.is_even
-
-        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
-        attr_vals.append(AttrVal('UNK_192', 'UNK_23'))
-        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
-        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
-        if idx:
-            attr_vals.append(AttrVal('MULT12_1_EN', 'TRUE'))
-        else:
-            attr_vals.append(AttrVal('MULT12X12_EN', 'TRUE'))
-            attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))  # connect the first multiplier as operand 0 ALU — it will be placed in the lower bits of the result.
-
-        for parm in ['AREG_CLK', 'BREG_CLK', 'PREG_CLK', 'OREG_CLK']:
-            val = cell_parms.get(parm, 'BYPASS')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        for parm in ['AREG_CE', 'BREG_CE', 'PREG_CE', 'OREG_CE']:
-            val = cell_parms.get(parm, 'CE0')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        for parm in ['AREG_RESET', 'BREG_RESET', 'PREG_RESET', 'OREG_RESET']:
-            val = cell_parms.get(parm, 'RESET0')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        attr = 'MULT_RESET_MODE'
-        val = cell_parms.get(attr, 'SYNC')
-        attr_vals.append(AttrVal(attr, val))
-
-        return attr_vals
-
-    def set_multaddalu12x12_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
-        """ 12x12 """
-        attr_vals = []
-        cell_parms = bel.cell.parms
-        cell_attrs = bel.cell.attrs
-
-        pair_idx = dsp_indices.pair_idx
-        idx = dsp_indices.idx
-        is_even = dsp_indices.is_even
-
-        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
-        attr_vals.append(AttrVal('UNK_192', 'UNK_23')) # see mult12x12
-        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
-        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
-        attr_vals.append(AttrVal('MULT12_1_EN', 'TRUE'))
-        attr_vals.append(AttrVal('MULT12X12_EN', 'TRUE'))
-        attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))
-        attr_vals.append(AttrVal('ALU', 'ENABLE'))
-        attr_vals.append(AttrVal('UNK_CLK_191', 'CLK0')) # XXX find out whose clock this is
-
-        if "USE_CASCADE_OUT" in cell_attrs:
-            attr_vals.append(AttrVal('CASO', 'ENABLE'))
-
-        for parm in [('OREG_CLK', 'BYPASS'), ('OREG_CE', 'CE0'), ('OREG_RESET', 'RESET0')]:
-            attr, default = parm
-            attr_vals.append(AttrVal(f'{attr[0]}0{attr[1:]}', cell_parms.get(attr, default)))
-            attr_vals.append(AttrVal(f'{attr[0]}1{attr[1:]}', cell_parms.get(attr, default)))
-
-        attr = 'DYN_CASI_SEL'
-        val = cell_parms.get(attr, 'FALSE')
-        attr_vals.append(AttrVal(attr, val))
-        if val == 'TRUE':
-            # XXX It seems that this input requires inversion.
-            attr_vals.append(AttrVal('CASISEL_PAD', 'INV'))
-
-        for parm in [('PREG0_CLK', 'BYPASS'), ('PREG0_CE', 'CE0'), ('PREG0_RESET', 'RESET0'),
-                     ('PREG1_CLK', 'BYPASS'), ('PREG1_CE', 'CE0'), ('PREG1_RESET', 'RESET0')]:
-            attr, default = parm
-            attr_vals.append(AttrVal(f'P{attr[4]}REG{attr[5:]}', cell_parms.get(attr, default)))
-
-        for parm in [('ACCSEL_IREG_CLK', 'BYPASS'), ('ACCSEL_IREG_CE', 'CE0'), ('ACCSEL_IREG_RESET', 'RESET0'),
-                     ('ACCSEL_PREG_CLK', 'BYPASS'), ('ACCSEL_PREG_CE', 'CE0'), ('ACCSEL_PREG_RESET', 'RESET0')]:
-            attr, default = parm
-            val = cell_parms.get(attr, default)
-            attr_vals.append(AttrVal(f'ACCSEL_0{attr[6:]}', val))
-            attr_vals.append(AttrVal(f'ACCSEL_1{attr[6:]}', val))
-
-        attr = 'PRE_LOAD'
-        val = cell_parms.get(attr, 0)
-        pre_load = str(val)
-        if len(pre_load) > 58:
-            pre_load = pre_load[-48:]
-        else:
-            pre_load = pre_load.rjust(48, '0')
-        for bitnum, pre_loadbit in enumerate(pre_load[::-1]):
-            attr_vals.append(AttrVal(f'PRELOAD_BIT_{bitnum}', pre_loadbit))
-
-        for parm in self.multaddalu12x12_defaults:
-            attr, default = parm
-            attr_vals.append(AttrVal(attr, cell_parms.get(attr, default)))
-
-        return attr_vals
-
-    def set_multalu27x18_attrvals(self, bel: BelDesc, dsp_indices: DspIndices) -> list[AttrVal]:
-        """ 27x18 """
-        attr_vals = []
-        cell_parms = bel.cell.parms
-        cell_attrs = bel.cell.attrs
-
-        pair_idx = dsp_indices.pair_idx
-        idx = dsp_indices.idx
-        is_even = dsp_indices.is_even
-
-        # The working theory is that the second multiplier needs to be shifted to the left by 24 bits, and perhaps this pair determines that.
-        attr_vals.append(AttrVal('UNK_192', 'UNK_23')) # see mult12x12
-        attr_vals.append(AttrVal('CE0_MUX', 'CE0_IN'))
-        attr_vals.append(AttrVal('CE1_MUX', 'CE1_IN'))
-        attr_vals.append(AttrVal('ALU_OP0_MUX', 'MULT0'))
-        attr_vals.append(AttrVal('ALU', 'ENABLE'))
-        attr_vals.append(AttrVal('UNK_CLK_191', 'CLK0')) # XXX find out whose clock this is
-
-        if "MULT27X36_MAIN" in cell_attrs:
-            attr_vals.append(AttrVal('MULT27X36', 'ENABLE'))
-        elif "MULT27X36_AUX" in cell_attrs:
-            attr_vals.append(AttrVal('CASI_SEL', 1))
-        else:
-            attr = 'CASI_SEL'
-            val = int(cell_parms.get(attr, '0'), 2)
-            attr_vals.append(AttrVal(attr, val))
-
-        if "USE_CASCADE_OUT" in cell_attrs:
-            attr_vals.append(AttrVal('CASO', 'ENABLE'))
-
-        for parm in [('OREG_CLK', 'BYPASS'), ('OREG_CE', 'CE0'), ('OREG_RESET', 'RESET0')]:
-            attr, default = parm
-            attr_vals.append(AttrVal(f'{attr[0]}0{attr[1:]}', cell_parms.get(attr, default)))
-            attr_vals.append(AttrVal(f'{attr[0]}1{attr[1:]}', cell_parms.get(attr, default)))
-
-        attr = 'DYN_CASI_SEL'
-        val = cell_parms.get(attr, 'FALSE')
-        attr_vals.append(AttrVal(attr, val))
-        if val == 'TRUE':
-            # XXX It seems that this input requires inversion.
-            attr_vals.append(AttrVal('CASISEL_PAD', 'INV'))
-
-        for parm in ['AREG_CLK', 'BREG_CLK']:
-            val = cell_parms.get(parm, 'BYPASS')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        for parm in ['AREG_CE', 'BREG_CE']:
-            val = cell_parms.get(parm, 'CE0')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        for parm in ['AREG_RESET', 'BREG_RESET']:
-            val = cell_parms.get(parm, 'RESET0')
-            attr_vals.append(AttrVal(f'{parm[0]}{idx}{parm[1:]}', val))
-
-        for parm in [('DREG_CLK', 'BYPASS'), ('DREG_CE', 'CE0'), ('DREG_RESET', 'RESET0')]:
-            attr, default = parm
-            attr_vals.append(AttrVal(f'A1{attr[1:]}', cell_parms.get(attr, default)))
-            attr_vals.append(AttrVal(f'B1{attr[1:]}', cell_parms.get(attr, default)))
-
-        for parm in [('PREG_CLK', 'BYPASS'), ('PREG_CE', 'CE0'), ('PREG_RESET', 'RESET0')]:
-            attr, default = parm
-            attr_vals.append(AttrVal(f'P0{attr[1:]}', cell_parms.get(attr, default)))
-
-        for parm in [('ACCSEL_IREG_CLK', 'BYPASS'), ('ACCSEL_IREG_CE', 'CE0'), ('ACCSEL_IREG_RESET', 'RESET0'),
-                     ('ACCSEL_PREG_CLK', 'BYPASS'), ('ACCSEL_PREG_CE', 'CE0'), ('ACCSEL_PREG_RESET', 'RESET0')]:
-            attr, default = parm
-            val = cell_parms.get(attr, default)
-            attr_vals.append(AttrVal(f'ACCSEL_0{attr[6:]}', val))
-            attr_vals.append(AttrVal(f'ACCSEL_1{attr[6:]}', val))
-
-        attr = 'PRE_LOAD'
-        val = cell_parms.get(attr, 0)
-        pre_load = str(val)
-        if len(pre_load) > 58:
-            pre_load = pre_load[-48:]
-        else:
-            pre_load = pre_load.rjust(48, '0')
-        for bitnum, pre_loadbit in enumerate(pre_load[::-1]):
-            attr_vals.append(AttrVal(f'PRELOAD_BIT_{bitnum}', pre_loadbit))
-
-        for parm in self.multalu27x18_defaults:
-            attr, default = parm
-            attr_vals.append(AttrVal(attr, cell_parms.get(attr, default)))
-
-        return attr_vals
-
-
-    def get_MULT12X12_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
-        """ 12x12 """
-        dsp_indices = self.decode_dsp_indices(bel)
-        attr_vals = self.set_mult12x12_attrvals(bel, dsp_indices)
-
-        return self.common_dsp_handler(bel, attr_vals)
-
-    def get_MULTADDALU12X12_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
-        """ 12x12 """
-        dsp_indices = self.decode_dsp_indices(bel)
-        attr_vals = self.set_multaddalu12x12_attrvals(bel, dsp_indices)
-
-        return self.common_dsp_handler(bel, attr_vals)
-
-    def get_MULTALU27X18_fuses(self, bel: BelDesc) -> list[CellFuseBits]:
-        """ 27x18 and 27x36 """
-        dsp_indices = self.decode_dsp_indices(bel)
-        attr_vals = self.set_multalu27x18_attrvals(bel, dsp_indices)
-
-        return self.common_dsp_handler(bel, attr_vals)
-
-
     # debug
     def __repr__(self):
         return super().__repr__() + ""
 
 ################################################################
-class GW5AT_60B(GW5A):
+class GW5AT_60B(GW5A_DSP, GW5A):
     """ GW5AT-60B chip. TangCosole60k board """
 
     # CLKDIV: one per HCLK lane, its ratio HCLKDIVn_DIV for lane n, as the
