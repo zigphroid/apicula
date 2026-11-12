@@ -4907,6 +4907,7 @@ def set_chip_flags(dev, device):
         # every read is 0 (checked on a Tang Console 60K).
         dev.chip_flags.append("NEED_BSRAM_RESET_FIX")
         dev.chip_flags.append("HAS_EMPTY_QUADRANT")
+        dev.chip_flags.append("HAS_5A_DSP")
         dev.chip_flags.append("HAS_5A_HCLK")
         dev.chip_flags.append("HAS_5A_IDES")
         dev.chip_flags.append("HAS_PINCFG")
@@ -4994,7 +4995,9 @@ def from_fse(device, fse, dat: Datfile):
         dev.tile_types.setdefault('C', set()).update(dev.tile_types['M'])
         dev.tile_types['P'] = set()
         dev.tile_types['M'] = set()
-        dev.tile_types['D5A'] = set()
+        # The 60B's DSPs are the 25A's: the same cells, and the 5A_DSP fuse
+        # table in each of the chip's 118 DSP tiles (types 20, 445 and 474).
+        dev.tile_types['D5A'] = dev.tile_types['D']
         dev.tile_types['D'] = set()
     if device in {'GW5AST-138C'}:
         dev.tile_types['P'] = set()
